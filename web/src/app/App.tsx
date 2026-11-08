@@ -4,6 +4,10 @@ import type { GameRecord } from '../core/chess/types';
 import { GameView } from '../features/game/GameView';
 import { ImportPanel } from '../features/import/ImportPanel';
 import { ResearchView } from '../features/research/ResearchView';
+import { backendEnabled } from '../features/library/api';
+import { AuthProvider } from '../features/library/AuthContext';
+import { LibraryView } from '../features/library/LibraryView';
+import { StatsView } from '../features/library/StatsView';
 import { gameStore } from '../storage/db';
 import { EngineProvider } from './EngineContext';
 import { useHashRoute, type Route } from './useHashRoute';
@@ -14,7 +18,9 @@ const SAMPLE_PGN_GAME_NOTE = 'Tip: import a PGN or fetch your games from Chess.c
 export function App() {
   return (
     <EngineProvider>
-      <Shell />
+      <AuthProvider>
+        <Shell />
+      </AuthProvider>
     </EngineProvider>
   );
 }
@@ -51,6 +57,8 @@ function Shell() {
   const nav: { route: Route; label: string; show: boolean }[] = [
     { route: 'analyse', label: 'Analyse', show: true },
     { route: 'research', label: 'Research', show: true },
+    { route: 'library', label: 'Library', show: backendEnabled },
+    { route: 'stats', label: 'Stats', show: backendEnabled },
     { route: 'about', label: 'About', show: true },
   ];
 
@@ -115,6 +123,8 @@ function Shell() {
           </div>
         )}
         {route === 'research' && <ResearchView />}
+        {route === 'library' && backendEnabled && <LibraryView onOpenGame={onImported} />}
+        {route === 'stats' && backendEnabled && <StatsView />}
         {route === 'about' && <About />}
       </main>
       <Disclaimer />

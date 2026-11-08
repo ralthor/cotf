@@ -1,43 +1,59 @@
-"""Mirrors web/src/core/brilliancy/brilliancy.test.ts."""
+"""Mirrors web/src/core/brilliancy/brilliancy.test.ts (brill-v2)."""
 
-from cloud.brilliancy import detect_sacrifice, evaluate_brilliance
+from cloud.brilliancy import detect_sacrifice, evaluate_brilliance, ordinal
 
 
 def cp(v):
     return {"kind": "cp", "value": v, "perspective": "white"}
 
 
-def shallow(ranks, sampled=30, legal=30):
-    return [{"depth": i + 1, "playedRank": r, "sampledLines": sampled, "legalMoves": legal, "bestScore": cp(50)}
-            for i, r in enumerate(ranks)]
+def shallow(rows, legal=30):
+    return [{"depth": i + 1, "playedRank": rank, "sampledLines": legal, "legalMoves": legal, "bestUci": "g1f3",
+             "bestScore": cp(best), "playedScore": cp(played)} for i, (played, best, rank) in enumerate(rows)]
 
 
 def base(**over):
-    traj = [-280, -310, -250, -200, -150, -60, 40, 300, 380, 420, 430, 440, 450, 450, 450, 450, 450, 450, 450, 450]
+    traj = [-650, -600, -600, -580, -300, 120, 140, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150]
     d = {
         "mover": "w",
-        "playedUci": "f1f7",
-        "shallow": shallow([6, 7, 6, 5, 4, 3, 2, 1]),
+        "playedUci": "f3e5",
+        "shallow": shallow([(-650, 40, 30), (-600, 35, 29), (-600, 30, 28)]),
         "trajectory": [{"depth": i + 1, "score": cp(v)} for i, v in enumerate(traj)],
-        "deep": {"depth": 20, "bestUci": "f1f7", "bestScore": cp(450), "secondScore": cp(60), "playedScore": cp(450)},
-        "recheck": {"depth": 24, "bestUci": "f1f7", "bestScore": cp(440), "secondScore": cp(50), "playedScore": cp(440)},
-        "sacrifice": {"isSacrifice": True, "note": "rook sac"},
+        "deep": {"depth": 18, "bestUci": "f3e5", "bestScore": cp(150), "secondScore": cp(20), "playedScore": cp(150)},
+        "recheck": {"depth": 20, "bestUci": "f3e5", "bestScore": cp(155), "secondScore": cp(25), "playedScore": cp(155)},
     }
     d.update(over)
     return d
 
 
-def test_sound_reversal_is_brilliant():
+def test_looks_bad_within_horizon_but_decisive_best_is_brilliant():
     e = evaluate_brilliance(base())
     assert e["verdict"] == "brilliant"
-    assert e["signals"]["shallowWorstRank"] == 7
-    assert e["signals"]["discoveryInterval"] == [8, 9]
-    assert e["confidence"] == "high"
+    assert e["signals"]["horizon"] == 3
+    assert e["signals"]["discoveryInterval"] == [5, 6]
+    assert "28th of 30" in " ".join(e["reasons"])
+
+
+def test_low_rank_in_already_winning_position_is_not_brilliant():
+    e = evaluate_brilliance(base(
+        shallow=shallow([(409, 804, 26), (409, 879, 26), (548, 897, 26)], 34),
+        trajectory=[{"depth": i + 1, "score": cp(v)} for i, v in enumerate(
+            [409, 409, 548, 357, 455, 455, 455, 700, 720, 730, 735, 740, 740, 740])],
+        deep={"depth": 14, "bestUci": "f3e5", "bestScore": cp(740), "secondScore": cp(700), "playedScore": cp(740)},
+        recheck={"depth": 16, "bestUci": "f3e5", "bestScore": cp(735), "secondScore": cp(690), "playedScore": cp(735)},
+    ))
+    assert e["verdict"] == "none"
+    assert not next(g for g in e["gates"] if g["name"] == "decisive")["passed"]
+
+
+def test_found_within_horizon_is_not_brilliant():
+    e = evaluate_brilliance(base(trajectory=[{"depth": i + 1, "score": cp(v)} for i, v in enumerate([-600] + [150] * 7)]))
+    assert e["verdict"] == "none"
 
 
 def test_refuted_sacrifice_is_not_brilliant():
-    e = evaluate_brilliance(base(deep={"depth": 20, "bestUci": "e2e4", "bestScore": cp(80), "secondScore": cp(60),
-                                       "playedScore": cp(-350)}))
+    e = evaluate_brilliance(base(deep={"depth": 18, "bestUci": "g1f3", "bestScore": cp(40), "secondScore": cp(30),
+                                       "playedScore": cp(-600)}))
     assert e["verdict"] == "none"
 
 
@@ -45,10 +61,8 @@ def test_without_recheck_only_candidate():
     assert evaluate_brilliance(base(recheck=None))["verdict"] == "candidate"
 
 
-def test_multipv2_rank_is_lower_bound():
-    e = evaluate_brilliance(base(shallow=shallow([None, None, None, 2, 1, 1], 2, 30)))
-    assert e["signals"]["shallowRankIsExact"] is False
-    assert e["signals"]["shallowWorstRank"] == 3
+def test_ordinal():
+    assert [ordinal(n) for n in (1, 2, 3, 11, 12, 21, 26)] == ["1st", "2nd", "3rd", "11th", "12th", "21st", "26th"]
 
 
 def test_sacrifice_detection():

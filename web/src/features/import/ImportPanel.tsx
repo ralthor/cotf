@@ -28,7 +28,14 @@ function formatDate(seconds?: number): string {
   return new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function ImportPanel({ onImported }: { onImported: (games: GameRecord[]) => void }) {
+type ImportProps = { onImported: (games: GameRecord[]) => void; knownIds: ReadonlySet<string> };
+
+/** Marks a fetched game that is already in the user's game list. */
+function InList({ id, knownIds }: { id: string; knownIds: ReadonlySet<string> }) {
+  return knownIds.has(id) ? <span className="in-list"> · ✓ in your games</span> : null;
+}
+
+export function ImportPanel({ onImported, knownIds }: ImportProps) {
   const [tab, setTabState] = useState<Tab>(() => {
     const saved = getPref('importTab');
     return saved === 'chesscom' || saved === 'lichess' || saved === 'pgn' ? saved : 'pgn';
@@ -48,8 +55,8 @@ export function ImportPanel({ onImported }: { onImported: (games: GameRecord[]) 
         ))}
       </div>
       {tab === 'pgn' && <PgnImport onImported={onImported} />}
-      {tab === 'chesscom' && <ChessComImport onImported={onImported} />}
-      {tab === 'lichess' && <LichessImport onImported={onImported} />}
+      {tab === 'chesscom' && <ChessComImport onImported={onImported} knownIds={knownIds} />}
+      {tab === 'lichess' && <LichessImport onImported={onImported} knownIds={knownIds} />}
     </section>
   );
 }
@@ -113,7 +120,7 @@ function PgnImport({ onImported }: { onImported: (g: GameRecord[]) => void }) {
   );
 }
 
-function ChessComImport({ onImported }: { onImported: (g: GameRecord[]) => void }) {
+function ChessComImport({ onImported, knownIds }: ImportProps) {
   const [username, setUsername] = useState(() => getPref('chesscomUsername') ?? '');
   const [saved, setSaved] = useState(() => getPref('chesscomUsername'));
   const [monthsBack, setMonthsBack] = useState(() => Number(getPref('chesscomMonths')) || 1);
@@ -202,7 +209,10 @@ function ChessComImport({ onImported }: { onImported: (g: GameRecord[]) => void 
               <li key={g.url ?? i}>
                 <button type="button" onClick={() => importOne(g)}>
                   {g.white?.username} ({g.white?.rating ?? '?'}) vs {g.black?.username} ({g.black?.rating ?? '?'})
-                  <div className="meta">{g.time_class} · {formatDate(g.end_time)} · {g.white?.result}/{g.black?.result}</div>
+                  <div className="meta">
+                    {g.time_class} · {formatDate(g.end_time)} · {g.white?.result}/{g.black?.result}
+                    {g.url && <InList id={`url:${g.url}`} knownIds={knownIds} />}
+                  </div>
                 </button>
               </li>
             ))}
@@ -213,7 +223,7 @@ function ChessComImport({ onImported }: { onImported: (g: GameRecord[]) => void 
   );
 }
 
-function LichessImport({ onImported }: { onImported: (g: GameRecord[]) => void }) {
+function LichessImport({ onImported, knownIds }: ImportProps) {
   const [input, setInput] = useState(() => getPref('lichessUsername') ?? '');
   const [saved, setSaved] = useState(() => getPref('lichessUsername'));
   const [games, setGames] = useState<LichessGame[] | null>(null);
@@ -304,6 +314,7 @@ function LichessImport({ onImported }: { onImported: (g: GameRecord[]) => void }
                 <div className="meta">
                   {g.speed} · {formatDate(g.lastMoveAt ? g.lastMoveAt / 1000 : undefined)} · {g.status}
                   {g.winner ? ` · ${g.winner} won` : ''}
+                  <InList id={`url:https://lichess.org/${g.id}`} knownIds={knownIds} />
                 </div>
               </button>
             </li>

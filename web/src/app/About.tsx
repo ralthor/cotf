@@ -43,11 +43,11 @@ export function About() {
       </p>
       <h3>Brilliant moves ({BRILLIANCY_VERSION}, experimental)</h3>
       <p className="small">
-        A move is a brilliant candidate when the engine ranks it poorly at shallow depths but finds it best and sound at depth.
-        The rank is measured over all legal moves, and the same move's score is tracked at every depth. The move must be best at the
-        deep search, must not leave the mover losing, must stay sound for several depths, and must survive an independent deeper
-        recheck. Material sacrifices and clear uniqueness strengthen the score. Engine depth is not human difficulty, so treat
-        this as evidence, not a verdict.
+        The idea: look at the position the way a player who calculates only 1–3 plies would. A move is brilliant when that
+        shallow look rates it a clear mistake (at least 10 points worse than the best move at that depth), yet a full-depth
+        search finds it is the best move, clearly better than the alternatives, sound from a depth beyond the shallow look,
+        and still best on a deeper recheck. Without the recheck it is shown as a candidate. Engine depth is not human
+        difficulty, so treat this as evidence, not a verdict.
       </p>
       <h3>Imports</h3>
       <p className="small">

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from analysis.scoring import classify_move, expected_score
 from games.models import Game
 
-from .brilliancy import BRILLIANCY_VERSION, detect_sacrifice, evaluate_brilliance
+from .brilliancy import BRILLIANCY_VERSION, POLICY, detect_sacrifice, evaluate_brilliance
 from .engine import SearchResult, StockfishRunner
 from .profiles import EngineProfile
 
@@ -131,16 +131,19 @@ class CloudGameAnalyser:
             if not r or r["forced"] or r.get("category") != "best" or mv.legal_move_count < 3:
                 continue
             root = roots[idx]
+            horizon = self.profile.brilliancy_shallow_depth
             shallow_miss = any(
-                d["depth"] <= 6 and d["lines"] and d["lines"][0]["pvUci"][:1] != [mv.uci] for d in (root.by_depth if root else [])
+                d["depth"] <= horizon and d["lines"] and d["lines"][0]["pvUci"][:1] != [mv.uci]
+                for d in (root.by_depth if root else [])
             )
             line = next((ln["pvUci"] for ln in r["lines"] if ln["pvUci"][:1] == [mv.uci]), [mv.uci])
             sac = detect_sacrifice(mv.fen_before, line)["isSacrifice"]
             gap = 0.0
             if r.get("secondScore"):
                 gap = (expected_score(r["bestScore"], mv.colour) - expected_score(r["secondScore"], mv.colour)) * 100
-            weight = (2 if shallow_miss else 0) + (2 if sac else 0) + (1 if gap >= 15 else 0)
-            if weight >= 2:
+            decisive = not r.get("secondScore") or gap >= POLICY["min_uniqueness_pct"]
+            weight = (2 if shallow_miss else 0) + (2 if sac else 0) + (2 if decisive else 0)
+            if weight >= 4:
                 scored.append((weight + gap / 100, idx))
         scored.sort(reverse=True)
         return sorted(idx for _, idx in scored[: self.profile.max_brilliancy_candidates])
@@ -148,16 +151,21 @@ class CloudGameAnalyser:
     def check_brilliance(self, mv) -> dict:
         p = self.profile
         legal = mv.legal_move_count
-        shallow_run = self._search(mv.fen_before, p.brilliancy_shallow_depth, min(legal, 64), clear_hash=True)
+        # Full-width search to the shallow horizon: every legal move scored at depths 1..horizon.
+        shallow_run = self._search(mv.fen_before, p.brilliancy_shallow_depth, legal, clear_hash=True)
         shallow = []
         for d in shallow_run.by_depth:
+            if d["depth"] > p.brilliancy_shallow_depth or not d["lines"]:
+                continue
             idx = next((i for i, ln in enumerate(d["lines"]) if ln["pvUci"][:1] == [mv.uci]), None)
             shallow.append({
                 "depth": d["depth"],
                 "playedRank": d["lines"][idx]["rank"] if idx is not None else None,
                 "sampledLines": len(d["lines"]),
                 "legalMoves": legal,
+                "bestUci": d["lines"][0]["pvUci"][0] if d["lines"][0]["pvUci"] else "",
                 "bestScore": d["lines"][0]["score"],
+                "playedScore": d["lines"][idx]["score"] if idx is not None else None,
             })
         traj_run = self._search(mv.fen_before, p.brilliancy_deep_depth, 1, [mv.uci], clear_hash=True)
         trajectory = [{"depth": d["depth"], "score": d["lines"][0]["score"]} for d in traj_run.by_depth if d["lines"]]

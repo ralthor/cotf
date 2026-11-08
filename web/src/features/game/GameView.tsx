@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Chessboard } from 'react-chessboard';
-import { Chess } from 'chess.js';
 import { gameTitle } from '../../core/chess/pgn';
 import { lichessAnalysisUrl } from '../../core/chess/links';
+import { fenAfterLine, squarePosition, uciLineToSan } from '../../core/chess/lines';
+import { getPref, setPref } from '../../storage/prefs';
+import { MoveFeedback } from './MoveFeedback';
 import { positionsOf, type GameRecord } from '../../core/chess/types';
-import { CATEGORY_LABELS } from '../../core/classification/classify';
 import type { EngineLine, EngineScore } from '../../core/engine/types';
 import { AVAILABLE_FLAVOURS, ENGINE_BUILDS, type EngineFlavour } from '../../core/engine/workerTransport';
 import { expectedScore, formatScore } from '../../core/scoring/score';
@@ -21,31 +22,6 @@ import { useGameAnalysis } from '../analysis/useGameAnalysis';
 
 type PvPreview = { baseFen: string; moves: string[]; index: number };
 
-/** Converts a UCI line into SAN for display, stopping at the first illegal move. */
-function uciLineToSan(fen: string, uci: string[], max = 10): string[] {
-  const c = new Chess(fen);
-  const out: string[] = [];
-  for (const u of uci.slice(0, max)) {
-    try {
-      out.push(c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }).san);
-    } catch {
-      break;
-    }
-  }
-  return out;
-}
-
-function fenAfterLine(fen: string, uci: string[]): string {
-  const c = new Chess(fen);
-  for (const u of uci) {
-    try {
-      c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] });
-    } catch {
-      break;
-    }
-  }
-  return c.fen();
-}
 
 function useBoardWidth() {
   const ref = useRef<HTMLDivElement>(null);
@@ -72,7 +48,13 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [filter, setFilter] = useState<MoveFilter>('all');
   const [pv, setPv] = useState<PvPreview | null>(null);
-  const [showArrows, setShowArrows] = useState(true);
+  // Best moves stay hidden until asked for, so the user can think first.
+  const [reveal, setReveal] = useState<{ pos: number; better: boolean; hint: boolean }>({ pos: 0, better: false, hint: false });
+  const [alwaysShow, setAlwaysShowState] = useState(() => getPref('alwaysShowBest') === '1');
+  const setAlwaysShow = (v: boolean) => {
+    setAlwaysShowState(v);
+    setPref('alwaysShowBest', v ? '1' : null);
+  };
   const [explainPly, setExplainPly] = useState<number | null>(null);
   const { analysis, setAnalysis, running, start, cancel } = useGameAnalysis(game);
   const engine = useEngine();
@@ -135,13 +117,22 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   const currentLines: EngineLine[] = useMemo(() => nextAnalysis?.lines ?? [], [nextAnalysis]);
   const fen = pv ? fenAfterLine(pv.baseFen, pv.moves.slice(0, pv.index)) : positions[pos]!;
 
+  // Reveals reset whenever the shown position changes.
+  const revealBetter = reveal.pos === pos && reveal.better;
+  const revealHint = reveal.pos === pos && reveal.hint;
+  const showHintArrow = (revealHint || alwaysShow) && !pv;
+
   const arrows = useMemo(() => {
-    if (!showArrows || pv) return [];
-    const out: { startSquare: string; endSquare: string; color: string }[] = [];
+    if (!showHintArrow) return [];
     const best = currentLines[0]?.pvUci[0];
-    if (best) out.push({ startSquare: best.slice(0, 2), endSquare: best.slice(2, 4), color: 'rgba(60,125,58,0.8)' });
-    return out;
-  }, [showArrows, pv, currentLines]);
+    return best ? [{ startSquare: best.slice(0, 2), endSquare: best.slice(2, 4), color: 'rgba(60,125,58,0.8)' }] : [];
+  }, [showHintArrow, currentLines]);
+
+  // Category badge on the square where the moved piece landed.
+  const badge =
+    !pv && lastMove && lastAnalysis?.category
+      ? { ...squarePosition(lastMove.uci.slice(2, 4), orientation), category: lastAnalysis.category }
+      : null;
 
   const squareStyles = useMemo(() => {
     if (!lastMove || pv) return {};
@@ -171,7 +162,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
         </div>
         <div className="board-col">
           <EvalStrip score={pv ? undefined : analysis?.positionEvals[pos]} />
-          <div ref={boardRef} style={{ width: '100%', touchAction: 'pan-y' }} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          <div ref={boardRef} className="board-wrap" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
             <Chessboard
               options={{
                 id: 'review-board',
@@ -185,6 +176,11 @@ export function GameView({ game, renderExtra }: GameViewProps) {
                 animationDurationInMs: 150,
               }}
             />
+            {badge && (
+              <div className="square-badge" style={{ left: `${badge.left}%`, top: `${badge.top}%` }} aria-hidden="true">
+                <CategoryBadge category={badge.category} />
+              </div>
+            )}
           </div>
           <div className="controls" role="group" aria-label="Navigation">
             <button type="button" onClick={() => go(0)} aria-label="First position" disabled={pos === 0 && !pv}>⏮</button>
@@ -203,9 +199,6 @@ export function GameView({ game, renderExtra }: GameViewProps) {
             >
               Lichess ↗
             </a>
-            <label className="row small hide-mobile">
-              <input type="checkbox" checked={showArrows} onChange={(e) => setShowArrows(e.target.checked)} /> Best-move arrow
-            </label>
           </div>
           {pv && (
             <div className="notice row" style={{ marginTop: 8, justifyContent: 'space-between' }}>
@@ -219,6 +212,21 @@ export function GameView({ game, renderExtra }: GameViewProps) {
               </span>
             </div>
           )}
+          <MoveFeedback
+            move={lastMove}
+            analysis={lastAnalysis}
+            nextLines={currentLines}
+            boardFen={positions[pos]!}
+            revealBetter={revealBetter}
+            revealHint={revealHint}
+            alwaysShow={alwaysShow}
+            onRevealBetter={() => setReveal({ pos, better: true, hint: revealHint })}
+            onRevealHint={() => setReveal({ pos, better: revealBetter, hint: true })}
+            onAlwaysShow={setAlwaysShow}
+            onPlayLine={(baseFen, moves) => setPv({ baseFen, moves, index: 1 })}
+            onExplainBrilliance={lastMove ? () => setExplainPly(lastMove.ply) : undefined}
+            analysed={!!analysis}
+          />
           {analysis && (
             <div className="panel" style={{ marginTop: 12, padding: 8 }}>
               <EvalChart
@@ -273,65 +281,6 @@ export function GameView({ game, renderExtra }: GameViewProps) {
               </div>
             )}
             {renderExtra?.({ game, analysis, setAnalysis })}
-          </section>
-
-          <section className="panel current-move" aria-label="Current move">
-            {lastMove ? (
-              <div className="stack small">
-                <div className="row">
-                  <strong>
-                    {lastMove.fullMoveNumber}
-                    {lastMove.colour === 'w' ? '.' : '...'} {lastMove.san}
-                  </strong>
-                  <CategoryBadge category={lastAnalysis?.category} candidate={lastAnalysis?.brilliance?.verdict === 'candidate'} />
-                  {lastAnalysis?.category && <span>{CATEGORY_LABELS[lastAnalysis.category].label}</span>}
-                </div>
-                {lastAnalysis?.bestScore && (
-                  <div>
-                    Played {formatScore(lastAnalysis.playedScore)} · Best{' '}
-                    {lastAnalysis.bestMoveUci && lastAnalysis.bestMoveUci !== lastMove.uci
-                      ? `${uciLineToSan(lastMove.fenBefore, [lastAnalysis.bestMoveUci])[0] ?? lastAnalysis.bestMoveUci} `
-                      : ''}
-                    {formatScore(lastAnalysis.bestScore)}
-                    {lastAnalysis.loss?.centipawnLoss !== undefined && ` · CPL ${lastAnalysis.loss.centipawnLoss}`}
-                    {lastAnalysis.loss && ` · −${lastAnalysis.loss.expectedLossPct.toFixed(1)} pts`}
-                    {` · depth ${lastAnalysis.depth}`}
-                  </div>
-                )}
-                {lastAnalysis?.reasons.slice(0, 3).map((r, i) => <div key={i} className="muted">{r}</div>)}
-                {lastAnalysis?.brilliance && lastAnalysis.brilliance.verdict !== 'none' && (
-                  <button type="button" className="link" onClick={() => setExplainPly(lastMove.ply)}>
-                    Why {lastAnalysis.brilliance.verdict === 'brilliant' ? 'brilliant' : 'a candidate'}? Depth-by-depth evidence
-                  </button>
-                )}
-                {lastMove.comment && <div className="muted">“{lastMove.comment}”</div>}
-              </div>
-            ) : (
-              <p className="small muted">Starting position.</p>
-            )}
-            <h3>Engine lines here</h3>
-            {currentLines.length === 0 ? (
-              <p className="small muted">{analysis ? 'No lines for this position.' : 'Analyse the game to see engine lines.'}</p>
-            ) : (
-              <ol className="lines">
-                {currentLines.map((l) => (
-                  <li key={l.rank}>
-                    <span className="score">{formatScore(l.score)}</span>
-                    {uciLineToSan(positions[pos]!, l.pvUci).map((san, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className="pv-move"
-                        onClick={() => setPv({ baseFen: positions[pos]!, moves: l.pvUci, index: i + 1 })}
-                      >
-                        {san}
-                      </button>
-                    ))}
-                    <span className="muted"> d{l.depth}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
           </section>
 
           <section className="panel" aria-label="Moves">

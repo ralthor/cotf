@@ -4,7 +4,7 @@
  */
 const PREFIX = 'chess-analyser:';
 
-export type PrefKey = 'chesscomUsername' | 'lichessUsername' | 'importTab' | 'chesscomMonths';
+export type PrefKey = 'chesscomUsername' | 'lichessUsername' | 'importTab' | 'chesscomMonths' | 'alwaysShowBest';
 
 export function getPref(key: PrefKey): string | null {
   try {

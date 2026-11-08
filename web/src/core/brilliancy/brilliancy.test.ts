@@ -1,102 +1,146 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateBrilliance, type BrillianceInput, type ShallowRankSample } from './detector';
+import { evaluateBrilliance, ordinal, type BrillianceInput, type ShallowSample } from './detector';
 import { detectSacrifice, materialBalance } from './sacrifice';
 import type { EngineScore } from '../engine/types';
 
 const cp = (value: number): EngineScore => ({ kind: 'cp', value, perspective: 'white' });
 
-/** Shallow samples where the played move has `ranks[d-1]` at depth d (full-width sampling). */
-function shallow(ranks: (number | null)[], sampledLines = 30, legalMoves = 30): ShallowRankSample[] {
-  return ranks.map((r, i) => ({ depth: i + 1, playedRank: r, sampledLines, legalMoves, bestScore: cp(50) }));
+/** Shallow samples (depths 1..n): played move score vs best-at-depth score, White to move. */
+function shallow(rows: [played: number, best: number, rank: number][], legal = 30): ShallowSample[] {
+  return rows.map(([played, best, rank], i) => ({
+    depth: i + 1,
+    playedRank: rank,
+    sampledLines: legal,
+    legalMoves: legal,
+    bestUci: 'g1f3',
+    bestScore: cp(best),
+    playedScore: cp(played),
+  }));
 }
 
-/** White-to-move hypothetical Rxf7!!: looks bad until depth ~8, then +4.5. */
-function brilliantInput(overrides: Partial<BrillianceInput> = {}): BrillianceInput {
-  const trajectory = [-280, -310, -250, -200, -150, -60, 40, 300, 380, 420, 430, 440, 450, 450, 450, 450, 450, 450, 450, 450].map(
-    (v, i) => ({ depth: i + 1, score: cp(v) }),
-  );
+/**
+ * Hypothetical Nxe5!: a 3-ply look sees a lost queen (-600 vs +30 for the best move);
+ * the engine finds the refutation of the capture from depth 6 and plays it at +150.
+ */
+function base(overrides: Partial<BrillianceInput> = {}): BrillianceInput {
+  const traj = [-650, -600, -600, -580, -300, 120, 140, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150];
   return {
     mover: 'w',
-    playedUci: 'f1f7',
-    shallow: shallow([6, 7, 6, 5, 4, 3, 2, 1]),
-    trajectory,
-    deep: { depth: 20, bestUci: 'f1f7', bestScore: cp(450), secondScore: cp(60), playedScore: cp(450) },
-    recheck: { depth: 24, bestUci: 'f1f7', bestScore: cp(440), secondScore: cp(50), playedScore: cp(440) },
-    sacrifice: { isSacrifice: true, maxDeficit: 5, persistedCheckpoints: 2, finalDelta: 1, inspectedPlies: 8, note: 'rook sac' },
+    playedUci: 'f3e5',
+    shallow: shallow([
+      [-650, 40, 30],
+      [-600, 35, 29],
+      [-600, 30, 28],
+    ]),
+    trajectory: traj.map((v, i) => ({ depth: i + 1, score: cp(v) })),
+    deep: { depth: 18, bestUci: 'f3e5', bestScore: cp(150), secondScore: cp(20), playedScore: cp(150) },
+    recheck: { depth: 20, bestUci: 'f3e5', bestScore: cp(155), secondScore: cp(25), playedScore: cp(155) },
     ...overrides,
   };
 }
 
-describe('evaluateBrilliance', () => {
-  it('recognises a sound shallow-to-deep reversal and explains it', () => {
-    const e = evaluateBrilliance(brilliantInput());
+describe('evaluateBrilliance (brill-v2, shallow horizon)', () => {
+  it('a move that looks like a blunder within 3 plies but is the decisive best move is brilliant', () => {
+    const e = evaluateBrilliance(base());
     expect(e.verdict).toBe('brilliant');
-    expect(e.signals.shallowWorstRank).toBe(7);
-    expect(e.signals.discoveryInterval).toEqual([8, 9]);
-    expect(e.confidence).toBe('high');
-    expect(e.reasons.join(' ')).toMatch(/Ranked #7/);
+    expect(e.signals.horizon).toBe(3);
+    expect(e.signals.shallowLossPct).toBeGreaterThan(40);
+    expect(e.signals.shallowView).toHaveLength(3);
+    expect(e.signals.discoveryInterval).toEqual([5, 6]);
+    expect(e.reasons.join(' ')).toMatch(/3-ply look rates it a mistake/);
+    expect(e.reasons.join(' ')).toMatch(/28th of 30/);
   });
 
-  it('a deeply refuted sacrifice is NOT brilliant despite its initial appearance', () => {
+  it('a low shallow rank in an already-winning position is NOT enough (the old false positive)', () => {
+    // Everything wins: the played move is +4 at shallow depth while the best is +8, and at depth
+    // it is only marginally better than the second move.
     const e = evaluateBrilliance(
-      brilliantInput({
-        deep: { depth: 20, bestUci: 'e2e4', bestScore: cp(80), secondScore: cp(60), playedScore: cp(-350) },
-        trajectory: [-280, 150, 300, 200, 50, -100, -250, -300, -340, -350].map((v, i) => ({ depth: i + 1, score: cp(v) })),
+      base({
+        shallow: shallow([
+          [409, 804, 26],
+          [409, 879, 26],
+          [548, 897, 26],
+        ], 34),
+        trajectory: [409, 409, 548, 357, 455, 455, 455, 700, 720, 730, 735, 740, 740, 740].map((v, i) => ({ depth: i + 1, score: cp(v) })),
+        deep: { depth: 14, bestUci: 'f3e5', bestScore: cp(740), secondScore: cp(700), playedScore: cp(740) },
+        recheck: { depth: 16, bestUci: 'f3e5', bestScore: cp(735), secondScore: cp(690), playedScore: cp(735) },
       }),
     );
     expect(e.verdict).toBe('none');
-    expect(e.gates.find((g) => g.name === 'deep-quality')!.passed).toBe(false);
+    expect(e.gates.find((g) => g.name === 'looks-bad-at-shallow-depth')!.passed).toBe(false);
+    expect(e.gates.find((g) => g.name === 'decisive')!.passed).toBe(false);
   });
 
-  it('an obvious best move (rank 1 throughout, never looked bad) is not brilliant', () => {
+  it('an obvious move (already best within the horizon) is not brilliant', () => {
     const e = evaluateBrilliance(
-      brilliantInput({
-        shallow: shallow([1, 1, 1, 1, 1, 1, 1, 1]),
-        trajectory: Array.from({ length: 20 }, (_, i) => ({ depth: i + 1, score: cp(450) })),
-        sacrifice: undefined,
+      base({
+        shallow: shallow([
+          [150, 150, 1],
+          [150, 150, 1],
+          [150, 150, 1],
+        ]),
+        trajectory: Array.from({ length: 18 }, (_, i) => ({ depth: i + 1, score: cp(150) })),
       }),
     );
     expect(e.verdict).toBe('none');
+  });
+
+  it('a deeply refuted sacrifice is not brilliant', () => {
+    const e = evaluateBrilliance(
+      base({ deep: { depth: 18, bestUci: 'g1f3', bestScore: cp(40), secondScore: cp(30), playedScore: cp(-600) } }),
+    );
+    expect(e.verdict).toBe('none');
+    expect(e.gates.find((g) => g.name === 'best-at-depth')!.passed).toBe(false);
+  });
+
+  it('a move found within the horizon does not count as found beyond it', () => {
+    const traj = [-600, 150, 150, 150, 150, 150, 150, 150].map((v, i) => ({ depth: i + 1, score: cp(v) }));
+    const e = evaluateBrilliance(base({ trajectory: traj }));
+    expect(e.gates.find((g) => g.name === 'found-beyond-horizon')!.passed).toBe(false);
+    expect(e.verdict).toBe('none');
+  });
+
+  it('respects a 1-ply horizon (e.g. Qb8+ in the Opera Game)', () => {
+    const m2: EngineScore = { kind: 'mate', moves: 2, winner: 'w', perspective: 'white' };
+    const trajectory = [cp(-800), cp(-800), ...Array.from({ length: 11 }, () => m2)].map((score, i) => ({ depth: i + 1, score }));
+    const e = evaluateBrilliance(
+      base({
+        shallow: shallow([[-800, 300, 35]]),
+        trajectory,
+        deep: { depth: 13, bestUci: 'f3e5', bestScore: m2, secondScore: cp(300), playedScore: m2 },
+        recheck: { depth: 15, bestUci: 'f3e5', bestScore: m2, playedScore: m2 },
+      }),
+    );
+    expect(e.signals.horizon).toBe(1);
+    expect(e.signals.discoveryInterval).toEqual([2, 3]);
+    expect(e.verdict).toBe('brilliant');
   });
 
   it('without an independent recheck the best possible verdict is "candidate"', () => {
-    const e = evaluateBrilliance(brilliantInput({ recheck: undefined }));
-    expect(e.verdict).toBe('candidate');
-    expect(e.signals.stable).toBeNull();
+    expect(evaluateBrilliance(base({ recheck: undefined })).verdict).toBe('candidate');
   });
 
   it('an unstable recheck rejects the move', () => {
-    const e = evaluateBrilliance(
-      brilliantInput({ recheck: { depth: 24, bestUci: 'g1f3', bestScore: cp(300), playedScore: cp(-50) } }),
-    );
+    const e = evaluateBrilliance(base({ recheck: { depth: 20, bestUci: 'g1f3', bestScore: cp(300), playedScore: cp(-50) } }));
     expect(e.verdict).toBe('none');
   });
 
-  it('does not claim exact rank #6 from a MultiPV=2 sample', () => {
-    const e = evaluateBrilliance(brilliantInput({ shallow: shallow([null, null, null, 2, 1, 1], 2, 30) }));
-    expect(e.signals.shallowRankIsExact).toBe(false);
-    expect(e.signals.shallowWorstRank).toBe(3); // only "outside top 2"
-    expect(e.reasons.join(' ')).toMatch(/#3\+/);
-  });
-
-  it('noisy oscillation that only settles at the last depth does not qualify', () => {
-    const traj = [-300, 400, -300, 400, -300, 400, -300, 400, -300, 450].map((v, i) => ({ depth: i + 1, score: cp(v) }));
-    const e = evaluateBrilliance(brilliantInput({ trajectory: traj, deep: { ...brilliantInput().deep, depth: 10 } }));
-    expect(e.gates.find((g) => g.name === 'sustained-discovery')!.passed).toBe(false);
-    expect(e.verdict).toBe('none');
-  });
-
-  it('scores Black moves from Black\'s perspective', () => {
+  it("scores Black moves from Black's perspective", () => {
     const flip = (s: EngineScore): EngineScore => (s.kind === 'cp' ? cp(-s.value) : s);
-    const w = brilliantInput();
+    const w = base();
     const b: BrillianceInput = {
       ...w,
       mover: 'b',
+      shallow: w.shallow.map((s) => ({ ...s, bestScore: flip(s.bestScore), playedScore: flip(s.playedScore!) })),
       trajectory: w.trajectory.map((t) => ({ ...t, score: flip(t.score) })),
       deep: { ...w.deep, bestScore: flip(w.deep.bestScore), secondScore: flip(w.deep.secondScore!), playedScore: flip(w.deep.playedScore) },
-      recheck: { ...w.recheck!, bestScore: flip(w.recheck!.bestScore), playedScore: flip(w.recheck!.playedScore) },
+      recheck: { ...w.recheck!, bestScore: flip(w.recheck!.bestScore), secondScore: flip(w.recheck!.secondScore!), playedScore: flip(w.recheck!.playedScore) },
     };
     expect(evaluateBrilliance(b).verdict).toBe('brilliant');
+  });
+
+  it('formats ordinals', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 26].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '26th']);
   });
 });
 

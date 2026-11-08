@@ -4,20 +4,26 @@ import { expectedScore, sortKey } from '../scoring/score';
 import type { SacrificeEvidence } from './sacrifice';
 
 /**
- * EXPERIMENTAL depth/rank-reversal brilliancy heuristic (version brill-v1).
- * A research heuristic, not a definition of human brilliance. See docs/ALGORITHM_AND_TEST_CASES.md.
+ * EXPERIMENTAL brilliancy heuristic (version brill-v2). A research heuristic, not a definition of
+ * human brilliance. See docs/ALGORITHM_AND_TEST_CASES.md.
+ *
+ * Idea: look at the position the way a player who calculates only 1–3 plies would (the
+ * "shallow horizon"). If the played move looks like a clear mistake there, but a full-depth
+ * search finds it is the best move, decisively better than the alternatives, and only becomes
+ * sound beyond the horizon, it is a brilliant candidate.
  */
-export const BRILLIANCY_VERSION = 'brill-v1';
+export const BRILLIANCY_VERSION = 'brill-v2';
 
-/** One depth of a full-width (MultiPV ≈ all legal moves) shallow root search. */
-export type ShallowRankSample = {
+/** One depth (≤ horizon) of a full-width search: every legal move scored at this depth. */
+export type ShallowSample = {
   depth: number;
-  /** 1-based rank of the played move among the sampled lines, or null if it was not among them. */
+  /** 1-based rank of the played move among all legal moves at this depth, or null if not sampled. */
   playedRank: number | null;
   sampledLines: number;
   legalMoves: number;
+  bestUci: string;
   bestScore: EngineScore;
-  /** Played move's score at this depth when it appears among the sampled lines. */
+  /** The played move's score at this depth (from the same full-width search). */
   playedScore?: EngineScore;
 };
 
@@ -35,15 +41,27 @@ export type DeepVerification = {
 export type BrillianceInput = {
   mover: Colour;
   playedUci: string;
-  shallow: ShallowRankSample[];
+  /** Depths 1..horizon of a full-width shallow search. */
+  shallow: ShallowSample[];
   trajectory: PlayedTrajectoryPoint[];
   deep: DeepVerification;
-  /** Independent re-verification (deeper or different budget). Missing ⇒ at most "candidate". */
+  /** Independent re-verification (deeper). Missing ⇒ at most "candidate". */
   recheck?: DeepVerification;
   sacrifice?: SacrificeEvidence;
 };
 
 export type BrillianceVerdict = 'brilliant' | 'candidate' | 'none';
+
+export type ShallowViewRow = {
+  depth: number;
+  playedRank: number | null;
+  legalMoves: number;
+  bestUci: string;
+  bestPct: number;
+  playedPct: number | null;
+  /** How much worse the played move looked than the best move at this depth (pts). */
+  lossPct: number | null;
+};
 
 export type BrillianceEvidence = {
   version: string;
@@ -51,10 +69,13 @@ export type BrillianceEvidence = {
   score: number; // 0..100
   confidence: 'low' | 'medium' | 'high';
   signals: {
-    shallowWorstRank: number | null;
-    shallowRankIsExact: boolean;
+    horizon: number;
+    /** Loss vs the shallow best move at the horizon depth (what a shallow calculator concludes). */
+    shallowLossPct: number | null;
+    shallowRank: number | null;
+    legalMoves: number | null;
+    shallowView: ShallowViewRow[];
     deepRank: 1 | null;
-    shallowWorstExpectedPct: number | null;
     deepExpectedPct: number;
     inversionPct: number | null;
     uniquenessGapPct: number | null;
@@ -68,26 +89,60 @@ export type BrillianceEvidence = {
 };
 
 export const BRILLIANCY_POLICY = {
+  /** Default shallow horizon in plies (search depth); the harness lets you change it. */
+  horizon: 3,
+  /** At the horizon the move must look at least this much worse than the best move (mistake level). */
+  minShallowLossPct: 10,
   minDeepExpected: 0.4, // not brilliant if the move still leaves the mover clearly losing
   bestTolerancePct: 1.5,
-  minShallowRank: 3,
-  minInversionPct: 15, // expected-score points gained by the same move from shallow to deep
-  minDiscoveryDepth: 4,
-  minSustainedDepths: 3, // the move must stay sound for at least this many trailing depths
+  /** The move must matter: best minus second-best at depth. */
+  minUniquenessPct: 8, // tentative: old false positive had 1.1, Légal 5.Nxe5 has ~9.4
   soundTolerancePct: 8, // trajectory point counts as "sound" if within this of the deep value
+  minSustainedDepths: 3,
   stabilityTolerancePct: 6,
-  brilliantScore: 55,
-  candidateScore: 40,
 };
 
 const pct = (s: EngineScore, c: Colour) => expectedScore(s, c) * 100;
+
+/** English ordinal for ranks ("1st", "2nd", "23rd"). */
+export function ordinal(n: number): string {
+  const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${s}`;
+}
 
 export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_POLICY): BrillianceEvidence {
   const { mover } = input;
   const gates: BrillianceEvidence['gates'] = [];
   const reasons: string[] = [];
 
-  // 1. Deep quality: played move is best or tied at the deepest search, and not losing.
+  // --- 1. Shallow view (depths 1..horizon) ---------------------------------------------------
+  const shallow = [...input.shallow].filter((s) => s.depth >= 1).sort((a, b) => a.depth - b.depth);
+  const horizon = shallow.length ? shallow[shallow.length - 1]!.depth : 0;
+  const shallowView: ShallowViewRow[] = shallow.map((s) => {
+    const bestPct = pct(s.bestScore, mover);
+    const playedPct = s.playedScore ? pct(s.playedScore, mover) : null;
+    return {
+      depth: s.depth,
+      playedRank: s.playedRank,
+      legalMoves: s.legalMoves,
+      bestUci: s.bestUci,
+      bestPct,
+      playedPct,
+      lossPct: playedPct === null ? null : Math.max(0, bestPct - playedPct),
+    };
+  });
+  const atHorizon = shallowView[shallowView.length - 1];
+  const shallowLossPct = atHorizon?.lossPct ?? null;
+  gates.push({
+    name: 'looks-bad-at-shallow-depth',
+    passed: shallowLossPct !== null && shallowLossPct >= policy.minShallowLossPct,
+    detail:
+      shallowLossPct === null
+        ? 'The played move was not measured at shallow depth.'
+        : `Searching ${horizon} ${horizon === 1 ? 'ply' : 'plies'} ahead, the move looks ${shallowLossPct.toFixed(1)} pts worse than ${atHorizon!.bestUci} (needs ≥ ${policy.minShallowLossPct}).`,
+  });
+
+  // --- 2. Deep quality ------------------------------------------------------------------------
   const deepPlayedPct = pct(input.deep.playedScore, mover);
   const deepBestPct = pct(input.deep.bestScore, mover);
   const deepIsBest =
@@ -95,39 +150,23 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
     sortKey(input.deep.playedScore, mover) >= sortKey(input.deep.bestScore, mover) ||
     deepBestPct - deepPlayedPct <= policy.bestTolerancePct;
   gates.push({
-    name: 'deep-quality',
+    name: 'best-at-depth',
     passed: deepIsBest && deepPlayedPct >= policy.minDeepExpected * 100,
     detail: `At depth ${input.deep.depth} the move is ${deepIsBest ? 'best/tied' : 'not best'} with ${deepPlayedPct.toFixed(1)}% expected score.`,
   });
 
-  // 2. Shallow rank (only trusted when the sample covered the played move or all legal moves).
-  const ranked = input.shallow.filter((s) => s.depth >= 1);
-  let shallowWorstRank: number | null = null;
-  let shallowRankIsExact = true;
-  let shallowWorstExpected: number | null = null;
-  for (const s of ranked) {
-    const exact = s.playedRank !== null || s.sampledLines >= s.legalMoves;
-    const rank = s.playedRank ?? s.sampledLines + 1; // "outside top N" ⇒ at least N+1
-    if (!exact) shallowRankIsExact = false;
-    if (shallowWorstRank === null || rank > shallowWorstRank) shallowWorstRank = rank;
-  }
-  for (const t of input.trajectory) {
-    if (t.depth > Math.max(...ranked.map((s) => s.depth), 0)) continue;
-    const p = pct(t.score, mover);
-    if (shallowWorstExpected === null || p < shallowWorstExpected) shallowWorstExpected = p;
-  }
-  const rankReversal = shallowWorstRank !== null && shallowWorstRank >= policy.minShallowRank;
-
-  // 3. Depth inversion for the SAME move.
-  const inversionPct = shallowWorstExpected === null ? null : deepPlayedPct - shallowWorstExpected;
-  const inverted = inversionPct !== null && inversionPct >= policy.minInversionPct;
+  // --- 3. Decisive: clearly better than the alternatives ------------------------------------
+  const uniquenessGapPct = input.deep.secondScore !== undefined ? deepBestPct - pct(input.deep.secondScore, mover) : null;
   gates.push({
-    name: 'overlooked-at-shallow-depth',
-    passed: rankReversal || inverted,
-    detail: `Worst shallow rank ${shallowWorstRank ?? 'n/a'}${shallowRankIsExact ? '' : ' (lower bound)'}; inversion ${inversionPct?.toFixed(1) ?? 'n/a'} pts.`,
+    name: 'decisive',
+    passed: uniquenessGapPct === null || uniquenessGapPct >= policy.minUniquenessPct,
+    detail:
+      uniquenessGapPct === null
+        ? 'Only one sensible move was available.'
+        : `Best minus second-best at depth: ${uniquenessGapPct.toFixed(1)} pts (needs ≥ ${policy.minUniquenessPct}).`,
   });
 
-  // 4. Discovery depth: first depth after which the move stays sound until the end.
+  // --- 4. Found only beyond the horizon, and stays sound ---------------------------------------
   const traj = [...input.trajectory].sort((a, b) => a.depth - b.depth);
   let discoveryDepth: number | null = null;
   let lastUnsound: number | null = null;
@@ -138,29 +177,26 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
       discoveryDepth = null;
     } else if (discoveryDepth === null) discoveryDepth = t.depth;
   }
-  if (lastUnsound === null && traj.length > 0) discoveryDepth = traj[0]!.depth; // never looked bad
+  if (lastUnsound === null && traj.length > 0) discoveryDepth = traj[0]!.depth;
   const discoveryInterval: [number, number] | null =
     discoveryDepth !== null && lastUnsound !== null ? [lastUnsound, discoveryDepth] : null;
+  const sustained = discoveryDepth !== null && traj.filter((t) => t.depth >= discoveryDepth!).length >= policy.minSustainedDepths;
   gates.push({
-    name: 'sustained-discovery',
-    passed:
-      discoveryDepth !== null &&
-      lastUnsound !== null &&
-      discoveryDepth >= policy.minDiscoveryDepth &&
-      traj.filter((t) => t.depth >= discoveryDepth!).length >= policy.minSustainedDepths,
+    name: 'found-beyond-horizon',
+    passed: discoveryDepth !== null && discoveryDepth > horizon && sustained,
     detail:
       discoveryDepth === null
         ? 'The move never settled into a sound evaluation.'
-        : lastUnsound === null
-          ? `Already sound from depth ${discoveryDepth}; nothing to discover.`
-          : `Looked unsound up to depth ${lastUnsound}, stays sound from depth ${discoveryDepth}.`,
+        : discoveryDepth <= horizon
+          ? `Already sound at depth ${discoveryDepth}, within the ${horizon}-ply horizon.`
+          : `Looked unsound up to depth ${lastUnsound}, sound from depth ${discoveryDepth}${sustained ? '' : ' (not sustained)'}.`,
   });
 
-  // 5. Uniqueness: best vs second-best at depth.
-  const uniquenessGapPct =
-    input.deep.secondScore !== undefined ? deepBestPct - pct(input.deep.secondScore, mover) : null;
+  // --- 5. Same move, shallow vs deep -----------------------------------------------------------
+  const horizonPlayed = traj.filter((t) => t.depth <= horizon).at(-1);
+  const inversionPct = horizonPlayed ? deepPlayedPct - pct(horizonPlayed.score, mover) : null;
 
-  // 6. Stability: independent recheck agrees.
+  // --- 6. Stability on an independent recheck ---------------------------------------------------
   let stable: boolean | null = null;
   if (input.recheck) {
     const rePlayed = pct(input.recheck.playedScore, mover);
@@ -176,31 +212,34 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
   }
 
   const sacrifice = input.sacrifice?.isSacrifice ?? false;
-
-  // Score: weighted, bounded signals.
   const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
   const score =
-    30 * clamp01((inversionPct ?? 0) / 40) +
-    25 * clamp01(((shallowWorstRank ?? 1) - 1) / 5) +
-    20 * clamp01((uniquenessGapPct ?? 0) / 25) +
+    30 * clamp01((shallowLossPct ?? 0) / 30) +
+    25 * clamp01((inversionPct ?? 0) / 40) +
+    20 * clamp01((uniquenessGapPct ?? policy.minUniquenessPct) / 25) +
     15 * (sacrifice ? 1 : 0) +
-    10 * clamp01((discoveryDepth ?? 0) / 12);
+    10 * clamp01(((discoveryDepth ?? 0) - horizon) / 8);
 
+  // Verdict = the checks. The score only ranks how strong the evidence is.
   const hardGatesPassed = gates.filter((g) => g.name !== 'stable-on-recheck').every((g) => g.passed);
   let verdict: BrillianceVerdict = 'none';
-  if (hardGatesPassed && score >= policy.candidateScore) verdict = 'candidate';
-  if (hardGatesPassed && stable === true && score >= policy.brilliantScore) verdict = 'brilliant';
-  if (stable === false) verdict = 'none';
+  if (hardGatesPassed) verdict = stable === true ? 'brilliant' : stable === null ? 'candidate' : 'none';
 
-  if (rankReversal) reasons.push(`Ranked #${shallowWorstRank}${shallowRankIsExact ? '' : '+'} at shallow depth, #1 at depth ${input.deep.depth}.`);
-  if (inverted) reasons.push(`Same move gained ${inversionPct!.toFixed(1)} expected-score points from shallow to deep search.`);
-  if (uniquenessGapPct !== null && uniquenessGapPct >= 10) reasons.push(`Clearly better than the second-best move (${uniquenessGapPct.toFixed(1)} pts).`);
+  if (shallowLossPct !== null && shallowLossPct >= policy.minShallowLossPct) {
+    const rank = atHorizon?.playedRank;
+    reasons.push(
+      `A ${horizon}-ply look rates it a mistake (${shallowLossPct.toFixed(1)} pts worse than ${atHorizon!.bestUci}${rank ? `; ${ordinal(rank)} of ${atHorizon!.legalMoves} moves` : ''}).`,
+    );
+  }
+  if (deepIsBest) reasons.push(`Best move at depth ${input.deep.depth}.`);
+  if (uniquenessGapPct !== null && uniquenessGapPct >= policy.minUniquenessPct)
+    reasons.push(`Clearly better than the second-best move (${uniquenessGapPct.toFixed(1)} pts).`);
   if (sacrifice) reasons.push(input.sacrifice!.note);
-  if (discoveryInterval) reasons.push(`Discovered between depth ${discoveryInterval[0]} and ${discoveryInterval[1]}.`);
+  if (discoveryInterval) reasons.push(`The engine finds it between depth ${discoveryInterval[0]} and ${discoveryInterval[1]}.`);
   for (const g of gates) if (!g.passed) reasons.push(`Gate failed (${g.name}): ${g.detail}`);
 
   const confidence: BrillianceEvidence['confidence'] =
-    stable === true && shallowRankIsExact && input.deep.depth >= 20 ? 'high' : stable === true ? 'medium' : 'low';
+    stable === true && input.deep.depth >= 20 ? 'high' : stable === true ? 'medium' : 'low';
 
   return {
     version: BRILLIANCY_VERSION,
@@ -208,10 +247,12 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
     score: Math.round(score),
     confidence,
     signals: {
-      shallowWorstRank,
-      shallowRankIsExact,
+      horizon,
+      shallowLossPct,
+      shallowRank: atHorizon?.playedRank ?? null,
+      legalMoves: atHorizon?.legalMoves ?? null,
+      shallowView,
       deepRank: deepIsBest ? 1 : null,
-      shallowWorstExpectedPct: shallowWorstExpected,
       deepExpectedPct: deepPlayedPct,
       inversionPct,
       uniquenessGapPct,

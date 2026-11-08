@@ -39,21 +39,36 @@ Running log of implementation decisions, deviations from `CHESS_ANALYSER_HANDOFF
 - **Accuracy `acc-v1`:** per move 100·e^(−0.045·loss), averaged over non-forced moves. No value is shown below 5 scored moves, and it is marked provisional until the analysis completes. Provider accuracy is shown in a separate row and is never substituted.
 - **Parity:** `shared/classifier-cases.json` is checked by both the TypeScript and Python test suites.
 
-## Brilliancy (`brill-v1`, experimental)
+## Brilliancy (`brill-v2`, experimental)
 
-- Signals are measured as follows:
-  - **Shallow rank:** one MultiPV = min(legal, 64) search to depth 8 with a cleared hash, so ranks are exact at every depth 1..8.
-  - **Same-move trajectory:** `searchmoves <played>` to the deep depth.
-  - **Deep verification:** root MultiPV 2.
-  - **Recheck:** an independent root search 2 plies deeper.
-- **Hard gates:**
-  - **Deep quality:** best or tied at depth, and the mover's expected score ≥ 40%.
-  - **Overlooked:** shallow rank ≥ 3, or a same-move inversion of ≥ 15 points.
-  - **Sustained discovery:** unsound up to some depth ≥ 3, then sound for ≥ 3 consecutive trailing depths, with discovery depth ≥ 4.
-- **Weighted score:** inversion 30, rank 25, uniqueness 20, sacrifice 15, discovery depth 10. ≥ 40 makes a *candidate*. ≥ 55 **and** a stable recheck makes *brilliant*. An unstable recheck makes it *none*.
-- **Sacrifice** means a material deficit of ≥ 2 pawns that persists for ≥ 2 consecutive mover-to-move checkpoints along the PV, so exchanges and recaptures cancel out.
-- In whole-game review, only a few candidates per game are checked: best-labelled moves with ≥ 3 legal moves, and at least two of these signals: shallow miss, sacrifice, or a gap ≥ 15 to second best.
-- **Not yet done:** tuning the weights on a curated validation set (handoff §12). The current numbers are first guesses, checked only against synthetic fixtures and the Opera Game.
+v1 used a shallow window of depths 1–8 and treated a low shallow rank as "overlooked". In practice this
+flagged moves in already-winning positions: a move ranked 26th of 34 at +4 while the best was +8 still wins,
+and other moves won just as well. v1 also displayed ranks as `#26`, which reads as "mate in 26". v2 follows
+the original idea more closely: **limit the look-ahead to 1–3 plies and require the move to look bad there.**
+
+- **Shallow look (horizon, default 3 plies, 1–6 in the harness):** one full-width search
+  (MultiPV = every legal move) to the horizon with a cleared hash, so each move's score and rank at depths
+  1..horizon are exact.
+- **Checks (all must pass):**
+  1. *looks-bad-at-shallow-depth:* at the horizon, the played move is ≥ 10 points (mistake level) worse than
+     the best move at that depth.
+  2. *best-at-depth:* best or tied at full depth, and the mover's expected score ≥ 40%.
+  3. *decisive:* best minus second-best at depth ≥ **8** points. This is tentative: the v1 false positive had
+     1.1, and Légal's 5.Nxe5 has about 9.4.
+  4. *found-beyond-horizon:* the same move (`searchmoves` trajectory) becomes sound only at a depth greater
+     than the horizon, and stays sound for ≥ 3 trailing depths.
+  5. *stable-on-recheck:* an independent search 2 plies deeper agrees.
+- **Verdict:** checks 1–4 plus a stable recheck give *brilliant*. Checks 1–4 with no recheck give *candidate*.
+  Anything else gives *none*. The 0–100 score only ranks the strength of the evidence (shallow loss 30,
+  inversion 25, decisiveness 20, sacrifice 15, discovery depth 10). It no longer gates the verdict.
+- **Real-engine results (Stockfish 19 lite, deep 18, recheck 20):**
+  - Opera Game 16.Qb8+ with a 1-ply horizon: **brilliant**. It is 43rd of 46 moves at depth 1 and found at depth 3.
+  - Légal's 5.Nxe5 with a 3-ply horizon: passes every check. It is 28th of 35 and found at depth 7.
+  - The old harness example (White already +8): **not brilliant**, because it is not decisive (0.7 points).
+- In whole-game review, candidates are best-labelled moves with at least two of: preferred differently by the
+  first pass within the horizon, decisive at the first pass, or a sacrifice.
+- **Known limit:** Stockfish "depth 3" still includes quiescence search and a strong NNUE evaluation, so it sees
+  more than a human looking 3 plies ahead. A material-only shallow search would model a human more literally.
 
 ## Imports
 
@@ -92,3 +107,23 @@ Running log of implementation decisions, deviations from `CHESS_ANALYSER_HANDOFF
   - The desktop layout is unchanged.
 - **GitHub Pages:** `BASE_PATH` sets Vite's `base`. `.github/workflows/deploy-pages.yml` derives it from the repository name (`/` for a `<user>.github.io` repo) and deploys `web/dist`. A `/chess-analyser/` build was verified in the browser: the engine loaded from the sub-folder and an analysis ran. Only the lite engine is published. The full-engine option is shown only when built with `VITE_FULL_ENGINE=1`.
 - **Privacy:** the original Chess.com test handle was replaced with `example_player` in the docs and test fixtures.
+
+## Review UI (third round)
+
+- **No forced scrolling while reviewing.** The move list now scrolls only its own box. It used
+  `scrollIntoView`, which also scrolled the page and pulled the board away. Verified: 25 steps on a phone and 12
+  on desktop kept the page scroll at 0.
+- **Category badge on the landing square** of the last move (for example "?" on f6 for 6...Nf6), drawn as an
+  overlay above the board.
+- **Move feedback card directly under the board**, so nothing requires leaving the board:
+  - It shows the move, its label, the loss in points and the evaluation.
+  - When the move was not best, **Show better move** reveals the better move, the best line (6 plies) and the
+    line after the played move. Each line has **▶ Play on board**.
+  - **Hint: best move** reveals the best move from the current position, with an arrow.
+  - Both stay hidden until asked, and reset on every new position. **Always show best moves** is remembered.
+  - The old always-on best-move arrow and the side "Engine lines" panel were removed.
+- `MoveAnalysis.playedPv` stores the played move's continuation for the "after your move" line.
+- **Phone imports:** after you tap a game in a fetched list, or in your games list, the page scrolls up to the
+  board if it is off-screen. Before this, the game opened above the list, out of view, and seemed not to
+  import. Fetched lists mark games already in your list with "✓ in your games".
+- **Fixed:** the ✕ (remove) button in the games list took the full row width, squeezing titles.

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Chess, DEFAULT_POSITION } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
-import { evaluateBrilliance, type BrillianceEvidence, type BrillianceInput } from '../../core/brilliancy/detector';
+import { evaluateBrilliance, ordinal, type BrillianceEvidence, type BrillianceInput } from '../../core/brilliancy/detector';
 import type { MoveRecord } from '../../core/chess/types';
 import type { EngineLine } from '../../core/engine/types';
 import { expectedScore, formatScore } from '../../core/scoring/score';
@@ -13,8 +13,14 @@ import { PRESETS } from '../analysis/types';
 
 const cache = new IdbAnalysisCache();
 
-/** Example from the handoff-style test set: Greek-gift style sacrifice position (White to move, Bxh7+). */
-const EXAMPLE = { fen: 'r1bq1rk1/pppn1ppp/4p3/3pP3/1b1P4/2NB1N2/PPP2PPP/R1BQK2R w KQ - 0 8', move: 'Bxh7+' };
+/**
+ * Légal's trap: 1.e4 e5 2.Nf3 d6 3.Bc4 Bg4 4.Nc3 g6 5.Nxe5! "hangs" the queen, but 5...Bxd1? loses to
+ * 6.Bxf7+ Ke7 7.Nd5#. A shallow look sees only the lost queen.
+ */
+const EXAMPLES = [
+  { label: "Légal's trap: 5.Nxe5!", fen: 'rn1qkbnr/ppp2p1p/3p2p1/4p3/2B1P1b1/2N2N2/PPPP1PPP/R1BQK2R w KQkq - 0 5', move: 'Nxe5', horizon: 3 },
+  { label: 'Opera Game: 16.Qb8+!!', fen: '4kb1r/p2n1ppp/4q3/4p1B1/4P3/1Q6/PPP2PPP/2KR4 w k - 0 16', move: 'Qb8+', horizon: 1 },
+];
 
 function toMove(fen: string, moveText: string): MoveRecord {
   const c = new Chess(fen);
@@ -47,7 +53,7 @@ export function ResearchView() {
   const [moveText, setMoveText] = useState('');
   const [depth, setDepth] = useState(18);
   const [multiPv, setMultiPv] = useState(3);
-  const [shallowDepth, setShallowDepth] = useState(8);
+  const [shallowDepth, setShallowDepth] = useState(3);
   const [deepDepth, setDeepDepth] = useState(20);
   const [recheckDepth, setRecheckDepth] = useState(22);
   const [live, setLive] = useState<{ depth: number; lines: EngineLine[]; done: boolean } | null>(null);
@@ -139,15 +145,19 @@ export function ResearchView() {
           {!fenValid && <p className="error small">Invalid FEN.</p>}
           <div className="row">
             <button type="button" onClick={() => setFen(DEFAULT_POSITION)}>Start position</button>
-            <button
-              type="button"
-              onClick={() => {
-                setFen(EXAMPLE.fen);
-                setMoveText(EXAMPLE.move);
-              }}
-            >
-              Load example sacrifice
-            </button>
+            {EXAMPLES.map((ex) => (
+              <button
+                key={ex.label}
+                type="button"
+                onClick={() => {
+                  setFen(ex.fen);
+                  setMoveText(ex.move);
+                  setShallowDepth(ex.horizon);
+                }}
+              >
+                {ex.label}
+              </button>
+            ))}
           </div>
           {fenValid && (
             <div style={{ maxWidth: 320 }}>
@@ -192,12 +202,13 @@ export function ResearchView() {
         <section className="panel stack">
           <h2>Brilliancy research harness</h2>
           <p className="small muted">
-            Measures the played move's rank at every shallow depth (MultiPV = all legal moves), its own score at every depth
-            (<code>go … searchmoves</code>), verifies at depth and rechecks deeper. Hash is cleared before each search.
+            Scores every legal move with a search limited to the shallow look (default 3 plies), follows the played move's own
+            score at every depth (<code>go … searchmoves</code>), then verifies at full depth and rechecks deeper. The hash is
+            cleared before each search.
           </p>
           <div className="row small">
             <label className="row">Played move <input value={moveText} onChange={(e) => setMoveText(e.target.value)} placeholder="Bxh7+ or d3h7" style={{ width: 110 }} /></label>
-            <label className="row">Shallow ≤ <input type="number" min={2} max={12} value={shallowDepth} onChange={(e) => setShallowDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
+            <label className="row" title="How many plies the shallow look calculates">Shallow look (plies) <input type="number" min={1} max={6} value={shallowDepth} onChange={(e) => setShallowDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
             <label className="row">Deep <input type="number" min={8} max={40} value={deepDepth} onChange={(e) => setDeepDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
             <label className="row">Recheck <input type="number" min={8} max={40} value={recheckDepth} onChange={(e) => setRecheckDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
             {busy === 'brilliancy' ? (
@@ -225,7 +236,7 @@ export function ResearchView() {
                       return (
                         <tr key={t.depth}>
                           <td>{t.depth}</td>
-                          <td>{s ? (s.playedRank ? `#${s.playedRank} / ${s.legalMoves}` : `> ${s.sampledLines}`) : '—'}</td>
+                          <td>{s?.playedRank ? `${ordinal(s.playedRank)} of ${s.legalMoves}` : '—'}</td>
                           <td>{formatScore(t.score)}</td>
                           <td>{(expectedScore(t.score, evidence.input.mover) * 100).toFixed(1)}%</td>
                           <td>{s ? formatScore(s.bestScore) : '—'}</td>

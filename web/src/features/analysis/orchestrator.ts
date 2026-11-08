@@ -3,7 +3,8 @@ import {
   BRILLIANCY_VERSION,
   type BrillianceEvidence,
   type BrillianceInput,
-  type ShallowRankSample,
+  type ShallowSample,
+  BRILLIANCY_POLICY,
 } from '../../core/brilliancy/detector';
 import { detectSacrifice } from '../../core/brilliancy/sacrifice';
 import {
@@ -219,6 +220,7 @@ export class GameAnalyser {
       playedScore: played.score,
       secondScore: root.lines[1]?.score,
       playedScoreMethod: method,
+      playedPv: played.pvUci,
       loss: c.loss,
       category: c.category,
       reasons: c.reasons,
@@ -241,16 +243,19 @@ export class GameAnalyser {
       const mv = game.moves[idx]!;
       if (mv.legalMoveCount < 3) return;
       const root = roots[idx];
-      // Was the played move NOT the top choice at some shallow iteration of the first pass?
-      const shallowMiss = (root?.byDepth ?? []).some((d) => d.depth <= 6 && d.lines[0] && d.lines[0].pvUci[0] !== mv.uci);
+      // Within the shallow horizon, did the first pass prefer another move?
+      const horizon = this.preset.brilliancyShallowDepth;
+      const shallowMiss = (root?.byDepth ?? []).some((d) => d.depth <= horizon && d.lines[0] && d.lines[0].pvUci[0] !== mv.uci);
       const line = m.lines.find((l) => l.pvUci[0] === mv.uci)?.pvUci ?? [mv.uci];
       const sac = detectSacrifice(mv.fenBefore, line).isSacrifice;
       const gap =
         m.secondScore !== undefined
           ? (expectedScore(m.bestScore, m.colour) - expectedScore(m.secondScore, m.colour)) * 100
           : 0;
-      const weight = (shallowMiss ? 2 : 0) + (sac ? 2 : 0) + (gap >= 15 ? 1 : 0);
-      if (weight >= 2) scored.push({ idx, weight: weight + gap / 100 });
+      // Need two of: missed at shallow depth, decisive (clearly better than the 2nd move), sacrifice.
+      const decisive = m.secondScore === undefined || gap >= BRILLIANCY_POLICY.minUniquenessPct;
+      const weight = (shallowMiss ? 2 : 0) + (sac ? 2 : 0) + (decisive ? 2 : 0);
+      if (weight >= 4) scored.push({ idx, weight: weight + gap / 100 });
     });
     return scored
       .sort((a, b) => b.weight - a.weight)
@@ -267,20 +272,26 @@ export class GameAnalyser {
   /** Runs the searches the detector needs (all with a cleared hash for reproducibility). */
   async collectBrillianceInput(mv: MoveRecord, signal?: AbortSignal): Promise<BrillianceInput> {
     const p = this.preset;
-    const multiPv = Math.min(mv.legalMoveCount, 64);
-    // Full-width shallow root search: exact rank of the played move at each depth 1..N.
-    const shallowRun = await this.search({ fen: mv.fenBefore, depth: p.brilliancyShallowDepth, multiPv, clearHash: true }, signal);
-    const shallow: ShallowRankSample[] = shallowRun.byDepth.map((d) => {
-      const idx = d.lines.findIndex((l) => l.pvUci[0] === mv.uci);
-      return {
-        depth: d.depth,
-        playedRank: idx >= 0 ? d.lines[idx]!.rank : null,
-        sampledLines: d.lines.length,
-        legalMoves: mv.legalMoveCount,
-        bestScore: d.lines[0]!.score,
-        playedScore: idx >= 0 ? d.lines[idx]!.score : undefined,
-      };
-    });
+    // Full-width search to the shallow horizon (default 3 plies): every legal move is scored at
+    // every depth 1..horizon, so the played move's shallow score and rank are exact.
+    const shallowRun = await this.search(
+      { fen: mv.fenBefore, depth: p.brilliancyShallowDepth, multiPv: mv.legalMoveCount, clearHash: true },
+      signal,
+    );
+    const shallow: ShallowSample[] = shallowRun.byDepth
+      .filter((d) => d.depth <= p.brilliancyShallowDepth && d.lines[0])
+      .map((d) => {
+        const idx = d.lines.findIndex((l) => l.pvUci[0] === mv.uci);
+        return {
+          depth: d.depth,
+          playedRank: idx >= 0 ? d.lines[idx]!.rank : null,
+          sampledLines: d.lines.length,
+          legalMoves: mv.legalMoveCount,
+          bestUci: d.lines[0]!.pvUci[0] ?? '',
+          bestScore: d.lines[0]!.score,
+          playedScore: idx >= 0 ? d.lines[idx]!.score : undefined,
+        };
+      });
     // Same played move, every depth (restricted root search, fresh hash).
     const trajRun = await this.search(
       { fen: mv.fenBefore, depth: p.brilliancyDeepDepth, multiPv: 1, searchMoves: [mv.uci], clearHash: true },

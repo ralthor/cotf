@@ -27,8 +27,16 @@ export function MoveList({
   filter: MoveFilter;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Keep the current move visible inside the list box only. scrollIntoView() would also scroll the
+  // page and pull the board out of view, so adjust the list's own scrollTop instead.
   useEffect(() => {
-    ref.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
+    const box = ref.current;
+    const el = box?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!box || !el) return;
+    const top = el.offsetTop; // .move-list is position: relative, so this is relative to the list
+    const bottom = top + el.offsetHeight;
+    if (top < box.scrollTop) box.scrollTop = top;
+    else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight;
   }, [current]);
 
   const rows: { num: number; w?: number; b?: number }[] = [];

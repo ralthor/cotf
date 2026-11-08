@@ -116,7 +116,7 @@ main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 
 .controls { display: flex; gap: 6px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
 
-.move-list { display: grid; grid-template-columns: 36px 1fr 1fr; gap: 2px 4px; max-height: 320px; overflow: auto; font-size: 14px; }
+.move-list { position: relative; display: grid; grid-template-columns: 36px 1fr 1fr; gap: 2px 4px; max-height: 320px; overflow: auto; font-size: 14px; }
 .move-list .num { color: var(--muted); text-align: right; padding: 3px 4px; }
 .move-list button { border: none; text-align: left; padding: 3px 6px; display: flex; gap: 6px; align-items: center; background: none; }
 .move-list button[aria-current='true'] { background: var(--surface-2); outline: 1px solid var(--accent); }
@@ -222,3 +222,25 @@ a.button-link:hover { border-color: var(--accent); }
   .modal { padding: 12px; max-height: 94vh; }
   .game-list button { min-height: 44px; }
 }
+
+.in-list { color: var(--cat-best); font-weight: 600; }
+
+/* Board with an overlay for the move-category badge on the landing square. */
+.board-wrap { position: relative; width: 100%; touch-action: pan-y; }
+.square-badge {
+  position: absolute; width: 12.5%; height: 12.5%; pointer-events: none; z-index: 3;
+  display: flex; justify-content: flex-end; align-items: flex-start;
+}
+.square-badge .badge {
+  transform: translate(35%, -35%); min-width: 26px; height: 26px; border-radius: 13px; font-size: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45); border: 2px solid #fff;
+}
+.move-feedback { margin-top: 8px; }
+.line-row { display: grid; gap: 2px; padding: 6px 8px; background: var(--surface-2); border-radius: 6px; }
+.line-row button { justify-self: start; margin-top: 2px; }
+.line-moves { font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.6; }
+.line-score { color: var(--text); }
+@media (max-width: 700px) {
+  .square-badge .badge { min-width: 22px; height: 22px; font-size: 11px; }
+}
+.game-list button.remove-game { width: auto; flex: 0 0 auto; padding: 4px 10px; }

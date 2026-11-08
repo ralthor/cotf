@@ -12,6 +12,7 @@ export type AnalysisPreset = {
   label: string;
   firstPassDepth: number;
   deepPassDepth: number;
+  /** Shallow horizon in plies for the brilliancy detector (what a 1–3 ply calculator sees). */
   brilliancyShallowDepth: number;
   brilliancyDeepDepth: number;
   recheckDepth: number;
@@ -27,7 +28,7 @@ export const PRESETS: Record<PresetId, AnalysisPreset> = {
     label: 'Fast (depth 12 → 16)',
     firstPassDepth: 12,
     deepPassDepth: 16,
-    brilliancyShallowDepth: 8,
+    brilliancyShallowDepth: 3,
     brilliancyDeepDepth: 16,
     recheckDepth: 18,
     movetimeCapMs: 4_000,
@@ -39,7 +40,7 @@ export const PRESETS: Record<PresetId, AnalysisPreset> = {
     label: 'Standard (depth 14 → 18)',
     firstPassDepth: 14,
     deepPassDepth: 18,
-    brilliancyShallowDepth: 8,
+    brilliancyShallowDepth: 3,
     brilliancyDeepDepth: 18,
     recheckDepth: 20,
     movetimeCapMs: 8_000,
@@ -51,7 +52,7 @@ export const PRESETS: Record<PresetId, AnalysisPreset> = {
     label: 'Deep (depth 16 → 22)',
     firstPassDepth: 16,
     deepPassDepth: 22,
-    brilliancyShallowDepth: 8,
+    brilliancyShallowDepth: 3,
     brilliancyDeepDepth: 22,
     recheckDepth: 24,
     movetimeCapMs: 20_000,
@@ -69,6 +70,8 @@ export type MoveAnalysis = {
   bestMoveUci?: string;
   bestScore?: EngineScore;
   playedScore?: EngineScore;
+  /** Engine continuation after the played move (starts with the played move). */
+  playedPv?: string[];
   secondScore?: EngineScore;
   /** Top lines from the pre-move position (white-relative scores). */
   lines: EngineLine[];

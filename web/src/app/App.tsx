@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { gameTitle } from '../core/chess/pgn';
 import type { GameRecord } from '../core/chess/types';
 import { GameView } from '../features/game/GameView';
@@ -30,6 +30,8 @@ function Shell() {
   const route = useHashRoute();
   const [games, setGames] = useState<GameRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const gameColRef = useRef<HTMLDivElement>(null);
+  const knownIds = useMemo(() => new Set(games.map((g) => g.id)), [games]);
 
   useEffect(() => {
     void gameStore.list().then((list) => {
@@ -37,6 +39,13 @@ function Shell() {
       if (list[0]) setSelectedId((id) => id ?? list[0]!.id);
     });
   }, []);
+
+  /** Brings the opened game into view: on phones it sits above the lists, off-screen. */
+  const revealGame = () =>
+    requestAnimationFrame(() => {
+      const el = gameColRef.current;
+      if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
 
   const onImported = useCallback((imported: GameRecord[]) => {
     setGames((prev) => {
@@ -46,7 +55,13 @@ function Shell() {
     if (imported[0]) setSelectedId(imported[0].id);
     for (const g of imported) void gameStore.put(g);
     if (window.location.hash !== '#/analyse' && window.location.hash !== '') window.location.hash = '#/analyse';
+    revealGame();
   }, []);
+
+  const select = (id: string) => {
+    setSelectedId(id);
+    revealGame();
+  };
 
   const remove = (id: string) => {
     void gameStore.remove(id);
@@ -83,7 +98,7 @@ function Shell() {
         {route === 'analyse' && (
           <div className="layout">
             <div className="stack">
-              <ImportPanel onImported={onImported} />
+              <ImportPanel onImported={onImported} knownIds={knownIds} />
               <section className="panel" aria-labelledby="games-title">
                 <h2 id="games-title">Games ({games.length})</h2>
                 {games.length === 0 ? (
@@ -96,14 +111,14 @@ function Shell() {
                           type="button"
                           style={{ flex: 1, minWidth: 0 }}
                           aria-current={g.id === selectedId ? 'true' : undefined}
-                          onClick={() => setSelectedId(g.id)}
+                          onClick={() => select(g.id)}
                         >
                           {gameTitle(g)}
                           <div className="meta">
                             {g.source} · {g.moves.length} plies
                           </div>
                         </button>
-                        <button type="button" className="link small" aria-label={`Remove ${gameTitle(g)}`} onClick={() => remove(g.id)}>
+                        <button type="button" className="link small remove-game" aria-label={`Remove ${gameTitle(g)}`} onClick={() => remove(g.id)}>
                           ✕
                         </button>
                       </li>
@@ -112,7 +127,7 @@ function Shell() {
                 )}
               </section>
             </div>
-            <div className="game-col">
+            <div className="game-col" ref={gameColRef}>
               {selected ? (
                 <GameView
                   key={selected.id}

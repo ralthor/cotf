@@ -1,0 +1,296 @@
+{
+ "policyVersion": "cls-v1",
+ "accuracyVersion": "acc-v1",
+ "cases": [
+  {
+   "name": "black best move, white-relative negative",
+   "mover": "b",
+   "playedUci": "e7e5",
+   "bestUci": "e7e5",
+   "best": {
+    "kind": "cp",
+    "value": -200,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": -200,
+    "perspective": "white"
+   },
+   "expected": "best",
+   "expectedCpl": 0
+  },
+  {
+   "name": "black worsens position",
+   "mover": "b",
+   "playedUci": "a7a6",
+   "bestUci": "e7e5",
+   "best": {
+    "kind": "cp",
+    "value": -200,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": 300,
+    "perspective": "white"
+   },
+   "expected": "blunder",
+   "expectedCpl": 500
+  },
+  {
+   "name": "tie within tolerance",
+   "mover": "w",
+   "playedUci": "d2d4",
+   "bestUci": "e2e4",
+   "best": {
+    "kind": "cp",
+    "value": 30,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": 24,
+    "perspective": "white"
+   },
+   "expected": "best",
+   "expectedCpl": 6
+  },
+  {
+   "name": "good",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "cp",
+    "value": 0,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": -20,
+    "perspective": "white"
+   },
+   "expected": "good",
+   "expectedCpl": 20
+  },
+  {
+   "name": "inaccuracy",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "cp",
+    "value": 0,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": -60,
+    "perspective": "white"
+   },
+   "expected": "questionable",
+   "expectedCpl": 60
+  },
+  {
+   "name": "mistake",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "cp",
+    "value": 0,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": -150,
+    "perspective": "white"
+   },
+   "expected": "mistake",
+   "expectedCpl": 150
+  },
+  {
+   "name": "blunder",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "cp",
+    "value": 0,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": -400,
+    "perspective": "white"
+   },
+   "expected": "blunder",
+   "expectedCpl": 400
+  },
+  {
+   "name": "forced",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "x",
+   "best": {
+    "kind": "cp",
+    "value": -500,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": -500,
+    "perspective": "white"
+   },
+   "forced": true,
+   "expected": "best",
+   "expectedCpl": 0
+  },
+  {
+   "name": "allows mate",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "cp",
+    "value": 50,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "mate",
+    "moves": 2,
+    "winner": "b",
+    "perspective": "white"
+   },
+   "expected": "blunder",
+   "expectedCpl": null
+  },
+  {
+   "name": "misses mate but winning",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "mate",
+    "moves": 3,
+    "winner": "w",
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": 900,
+    "perspective": "white"
+   },
+   "expected": "mistake",
+   "expectedCpl": null
+  },
+  {
+   "name": "misses mate into equality",
+   "mover": "b",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "mate",
+    "moves": 1,
+    "winner": "b",
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": 0,
+    "perspective": "white"
+   },
+   "expected": "blunder",
+   "expectedCpl": null
+  },
+  {
+   "name": "slower mate",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "mate",
+    "moves": 2,
+    "winner": "w",
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "mate",
+    "moves": 5,
+    "winner": "w",
+    "perspective": "white"
+   },
+   "expected": "good",
+   "expectedCpl": null
+  },
+  {
+   "name": "mated anyway",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "mate",
+    "moves": 4,
+    "winner": "b",
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "mate",
+    "moves": 4,
+    "winner": "b",
+    "perspective": "white"
+   },
+   "expected": "best",
+   "expectedCpl": null
+  },
+  {
+   "name": "brilliant flag on best move",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "x",
+   "best": {
+    "kind": "cp",
+    "value": 400,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": 400,
+    "perspective": "white"
+   },
+   "brilliant": true,
+   "expected": "brilliant",
+   "expectedCpl": 0
+  },
+  {
+   "name": "brilliant flag ignored on bad move",
+   "mover": "w",
+   "playedUci": "x",
+   "bestUci": "y",
+   "best": {
+    "kind": "cp",
+    "value": 400,
+    "perspective": "white"
+   },
+   "played": {
+    "kind": "cp",
+    "value": 0,
+    "perspective": "white"
+   },
+   "brilliant": true,
+   "expected": "blunder",
+   "expectedCpl": 400
+  }
+ ],
+ "accuracy": {
+  "losses": [
+   1,
+   2,
+   3,
+   30,
+   4,
+   0
+  ]
+ }
+}

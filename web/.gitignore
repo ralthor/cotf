@@ -1,0 +1,6 @@
+node_modules
+dist
+public/engines
+playwright-report
+test-results
+*.local

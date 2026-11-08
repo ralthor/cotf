@@ -1,4 +1,4 @@
-# Full stack: web (static), API, Postgres, Redis, sync worker and beat.
+# Full stack: web (static), API, Postgres, Redis, sync worker, beat, and an isolated engine worker.
 #   cp backend/.env.example backend/.env   # then edit secrets
 #   docker compose up --build
 services:
@@ -37,6 +37,21 @@ services:
     env_file: backend/.env
     depends_on: [db, redis]
     command: celery -A config beat --loglevel INFO
+
+  worker-engine:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.engine
+    env_file: backend/.env
+    depends_on: [db, redis]
+    # Resource budget and isolation for CPU-heavy Stockfish jobs.
+    cpus: 2
+    mem_limit: 2g
+    pids_limit: 128
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
 
   web:
     build:

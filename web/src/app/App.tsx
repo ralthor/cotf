@@ -8,6 +8,7 @@ import { backendEnabled } from '../features/library/api';
 import { AuthProvider } from '../features/library/AuthContext';
 import { LibraryView } from '../features/library/LibraryView';
 import { StatsView } from '../features/library/StatsView';
+import { CloudAnalysisPanel } from '../features/cloud/CloudAnalysisPanel';
 import { gameStore } from '../storage/db';
 import { EngineProvider } from './EngineContext';
 import { useHashRoute, type Route } from './useHashRoute';
@@ -113,7 +114,11 @@ function Shell() {
             </div>
             <div className="game-col">
               {selected ? (
-                <GameView key={selected.id} game={selected} />
+                <GameView
+                  key={selected.id}
+                  game={selected}
+                  renderExtra={backendEnabled ? (ctx) => <CloudAnalysisPanel {...ctx} /> : undefined}
+                />
               ) : (
                 <div className="panel">
                   <p>Select or import a finished game to review it with Stockfish in your browser.</p>

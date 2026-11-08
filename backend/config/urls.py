@@ -13,4 +13,5 @@ urlpatterns = [
     path("api/", include("accounts.urls")),
     path("api/", include("games.urls")),
     path("api/", include("analysis.urls")),
+    path("api/", include("cloud.urls")),
 ]

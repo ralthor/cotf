@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "accounts",
     "games",
     "analysis",
+    "cloud",
 ]
 
 MIDDLEWARE = [
@@ -112,6 +113,7 @@ REST_FRAMEWORK = {
         "user": "600/min",
         "auth": "10/min",
         "imports": "20/hour",
+        "cloud": "30/hour",
     },
 }
 
@@ -125,11 +127,16 @@ CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_ROUTES = {
     "games.tasks.*": {"queue": "sync"},
+    "cloud.tasks.*": {"queue": "engine"},
 }
 CELERY_BEAT_SCHEDULE = {
     "sync-all-external-accounts": {
         "task": "games.tasks.sync_all_accounts",
         "schedule": crontab(minute=17, hour="*/6"),
+    },
+    "reap-stale-cloud-jobs": {
+        "task": "cloud.tasks.reap_stale_jobs",
+        "schedule": crontab(minute="*/10"),
     },
 }
 
@@ -141,6 +148,15 @@ PROVIDER_USER_AGENT = os.environ.get(
 SYNC_MAX_MONTHS_INITIAL = int(os.environ.get("SYNC_MAX_MONTHS_INITIAL", "3"))
 SYNC_LICHESS_MAX_GAMES = int(os.environ.get("SYNC_LICHESS_MAX_GAMES", "300"))
 MAX_PGN_BYTES = 5 * 1024 * 1024
+
+# --- Cloud analysis (Phase 3) ---------------------------------------------------------------------
+STOCKFISH_PATH = os.environ.get("STOCKFISH_PATH", "stockfish")
+CLOUD_ANALYSIS_ENABLED = env_bool("CLOUD_ANALYSIS_ENABLED", True)
+CLOUD_MAX_ACTIVE_JOBS_PER_USER = int(os.environ.get("CLOUD_MAX_ACTIVE_JOBS_PER_USER", "2"))
+CLOUD_DAILY_QUOTA_POSITIONS = int(os.environ.get("CLOUD_DAILY_QUOTA_POSITIONS", "2000"))
+CLOUD_JOB_TIME_LIMIT_S = int(os.environ.get("CLOUD_JOB_TIME_LIMIT_S", "1800"))
+CLOUD_ENGINE_THREADS = int(os.environ.get("CLOUD_ENGINE_THREADS", "2"))
+CLOUD_ENGINE_HASH_MB = int(os.environ.get("CLOUD_ENGINE_HASH_MB", "256"))
 
 if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True

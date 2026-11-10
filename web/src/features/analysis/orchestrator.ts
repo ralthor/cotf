@@ -16,6 +16,7 @@ import {
 } from '../../core/classification/classify';
 import type { GameRecord, MoveRecord } from '../../core/chess/types';
 import type { EngineClient } from '../../core/engine/EngineClient';
+import { forEachConcurrent } from '../../core/engine/EnginePool';
 import { EngineError, type EngineLine, type PositionAnalysis, type SearchRequest } from '../../core/engine/types';
 import { ACCURACY_VERSION, gameAccuracy } from '../../core/scoring/accuracy';
 import { cpFor, expectedScore } from '../../core/scoring/score';
@@ -30,8 +31,15 @@ export type RunOptions = {
   skipBrilliancy?: boolean;
 };
 
-/** The subset of EngineClient the orchestrator needs (eases testing). */
-export type EngineLike = Pick<EngineClient, 'analyse' | 'init' | 'info'>;
+/**
+ * The subset of EngineClient the orchestrator needs (eases testing). An EnginePool also fits:
+ * `size` is how many searches it can run at once (1 for a single engine).
+ */
+export type EngineLike = Pick<EngineClient, 'analyse' | 'init' | 'info'> & {
+  readonly size?: number;
+  /** Runs `fn` with one engine reserved for it (EnginePool); a single engine is simply passed. */
+  withEngine?: <T>(fn: (engine: Pick<EngineClient, 'analyse'>) => Promise<T>, signal?: AbortSignal) => Promise<T>;
+};
 
 export class GameAnalyser {
   constructor(
@@ -41,12 +49,20 @@ export class GameAnalyser {
     private readonly policy: ClassifierPolicy = DEFAULT_POLICY,
   ) {}
 
-  /** Runs a cached search: identical requests on the same engine build are never repeated. */
-  async search(req: SearchRequest, signal?: AbortSignal): Promise<PositionAnalysis> {
+  /** Searches that can run at once: one per engine in a pool. */
+  private get parallel(): number {
+    return Math.max(1, this.engine.size ?? 1);
+  }
+
+  /**
+   * Runs a cached search: identical requests on the same engine build are never repeated.
+   * `on` pins it to a reserved engine (see `withEngine`).
+   */
+  async search(req: SearchRequest, signal?: AbortSignal, on?: Pick<EngineClient, 'analyse'>): Promise<PositionAnalysis> {
     const key = analysisCacheKey(this.engine.info.id, req);
     const hit = await this.cache.get(key);
     if (hit && !hit.stopped) return hit;
-    const res = await this.engine.analyse(req, { signal });
+    const res = await (on ?? this.engine).analyse(req, { signal });
     if (!res.stopped) await this.cache.set(key, res);
     return res;
   }
@@ -81,17 +97,26 @@ export class GameAnalyser {
       state.engineId = this.engine.info.id;
 
       // ---- Pass 1: every pre-move position at a fast depth, MultiPV 2 ----
+      // Positions are independent, but consecutive positions share most of their search tree, so
+      // each engine takes a run of consecutive positions and keeps its hash between them.
       state.phase = 'first-pass';
       const roots: (PositionAnalysis | undefined)[] = new Array(n + 1).fill(undefined);
-      for (let i = 0; i <= n; i++) {
-        throwIfAborted(signal);
-        const fen = i === 0 ? game.initialFen : game.moves[i - 1]!.fenAfter;
-        state.progress = { done: i, total: n + 1, label: `Position ${i}/${n}` };
-        roots[i] = await this.search(this.rootRequest(fen, this.preset.firstPassDepth), signal);
-        state.positionEvals[i] = roots[i]!.lines[0]?.score;
-        if (i > 0) state.moves[i - 1] = await this.scoreMove(game.moves[i - 1]!, roots[i - 1]!, 'first', signal);
-        emit();
-      }
+      let done = 0;
+      state.progress = { done: 0, total: n + 1, label: `Position 0/${n}` };
+      await forEachConcurrent(consecutiveChunks(n + 1, this.parallel), this.parallel, (chunk) =>
+        this.withEngine(async (on) => {
+          for (const i of chunk) {
+            throwIfAborted(signal);
+            const fen = i === 0 ? game.initialFen : game.moves[i - 1]!.fenAfter;
+            roots[i] = await this.search(this.rootRequest(fen, this.preset.firstPassDepth), signal, on);
+            state.positionEvals[i] = roots[i]!.lines[0]?.score;
+            if (i < n) state.moves[i] = await this.scoreMove(game.moves[i]!, roots[i]!, 'first', signal, on);
+            done++;
+            state.progress = { done, total: n + 1, label: `Position ${done}/${n + 1}` };
+            emit();
+          }
+        }, signal),
+      );
 
       // ---- Pass 2: deeper look at interesting positions ----
       state.phase = 'deep-pass';
@@ -99,34 +124,44 @@ export class GameAnalyser {
         .map((m, idx) => ({ m, idx }))
         .filter(({ m }) => m && this.isInteresting(m))
         .slice(0, this.preset.maxDeepPositions);
-      for (let k = 0; k < interesting.length; k++) {
+      done = 0;
+      state.progress = { done: 0, total: interesting.length, label: `Deep check 0/${interesting.length}` };
+      emit();
+      await forEachConcurrent(interesting, this.parallel, async ({ idx }) => {
         throwIfAborted(signal);
-        const { idx } = interesting[k]!;
         const mv = game.moves[idx]!;
-        state.progress = { done: k, total: interesting.length, label: `Deep check ${k + 1}/${interesting.length}` };
-        emit();
-        const root = await this.search(this.rootRequest(mv.fenBefore, this.preset.deepPassDepth), signal);
-        const deeper = await this.scoreMove(mv, root, 'deep', signal);
-        deeper.passes = [...(state.moves[idx]?.passes ?? []), 'deep'];
-        state.moves[idx] = deeper;
+        const deeper = await this.withEngine(async (on) => {
+          const root = await this.search(this.rootRequest(mv.fenBefore, this.preset.deepPassDepth), signal, on);
+          return { root, analysis: await this.scoreMove(mv, root, 'deep', signal, on) };
+        }, signal);
+        const root = deeper.root;
+        deeper.analysis.passes = [...(state.moves[idx]?.passes ?? []), 'deep'];
+        state.moves[idx] = deeper.analysis;
         state.positionEvals[idx] = root.lines[0]?.score ?? state.positionEvals[idx];
-      }
+        done++;
+        state.progress = { done, total: interesting.length, label: `Deep check ${done}/${interesting.length}` };
+        emit();
+      });
 
       // ---- Pass 3: experimental brilliancy detector on a few candidates ----
       if (!opts.skipBrilliancy) {
         state.phase = 'brilliancy';
         const candidates = this.brilliancyCandidates(game, state, roots);
-        for (let k = 0; k < candidates.length; k++) {
+        done = 0;
+        state.progress = { done: 0, total: candidates.length, label: `Brilliancy check 0/${candidates.length}` };
+        emit();
+        // Each check's own searches also run in parallel, so one candidate at a time per ~4 engines.
+        await forEachConcurrent(candidates, Math.max(1, Math.ceil(this.parallel / 4)), async (idx) => {
           throwIfAborted(signal);
-          const idx = candidates[k]!;
-          state.progress = { done: k, total: candidates.length, label: `Brilliancy check ${k + 1}/${candidates.length}` };
-          emit();
           let result;
           try {
             result = await this.checkBrilliance(game.moves[idx]!, signal);
           } catch (e) {
             if (e instanceof EngineError && e.code === 'cancelled') throw e;
-            continue; // a failed research check never blocks the review
+            return; // a failed research check never blocks the review
+          } finally {
+            done++;
+            state.progress = { done, total: candidates.length, label: `Brilliancy check ${done}/${candidates.length}` };
           }
           const current = state.moves[idx]!;
           const reclass = classifyMove(
@@ -148,7 +183,8 @@ export class GameAnalyser {
             reasons: result.verdict !== 'none' ? [...reclass.reasons, ...result.reasons] : reclass.reasons,
             passes: [...current.passes, 'brilliancy'],
           };
-        }
+          emit();
+        });
       }
 
       for (const m of state.moves) if (m) m.provisional = false;
@@ -166,6 +202,11 @@ export class GameAnalyser {
     }
   }
 
+  /** Reserves one engine for `fn` when the engine is a pool; otherwise uses the single engine. */
+  private withEngine<T>(fn: (on: Pick<EngineClient, 'analyse'>) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.engine.withEngine ? this.engine.withEngine(fn, signal) : fn(this.engine);
+  }
+
   rootRequest(fen: string, depth: number): SearchRequest {
     return { fen, depth, multiPv: 2, movetimeMs: this.preset.movetimeCapMs };
   }
@@ -180,6 +221,7 @@ export class GameAnalyser {
     root: PositionAnalysis,
     pass: 'first' | 'deep',
     signal?: AbortSignal,
+    on?: Pick<EngineClient, 'analyse'>,
   ): Promise<MoveAnalysis> {
     const best = root.lines[0];
     const forced = mv.legalMoveCount <= 1;
@@ -203,6 +245,7 @@ export class GameAnalyser {
       const restricted = await this.search(
         { fen: mv.fenBefore, depth: root.requestedDepth, multiPv: 1, searchMoves: [mv.uci], movetimeMs: this.preset.movetimeCapMs },
         signal,
+        on,
       );
       played = restricted.lines[0];
       method = 'searchmoves';
@@ -272,12 +315,18 @@ export class GameAnalyser {
   /** Runs the searches the detector needs (all with a cleared hash for reproducibility). */
   async collectBrillianceInput(mv: MoveRecord, signal?: AbortSignal): Promise<BrillianceInput> {
     const p = this.preset;
-    // Full-width search to the shallow horizon (default 3 plies): every legal move is scored at
-    // every depth 1..horizon, so the played move's shallow score and rank are exact.
-    const shallowRun = await this.search(
-      { fen: mv.fenBefore, depth: p.brilliancyShallowDepth, multiPv: mv.legalMoveCount, clearHash: true },
-      signal,
-    );
+    // The four searches are independent (each clears its own engine's hash), so with an engine
+    // pool they run at the same time.
+    // - Full-width search to the shallow horizon (default 3 plies): every legal move is scored at
+    //   every depth 1..horizon, so the played move's shallow score and rank are exact.
+    // - The same played move at every depth (restricted root search).
+    // - Full depth, and a deeper recheck.
+    const [shallowRun, trajRun, deepRoot, recheckRoot] = await Promise.all([
+      this.search({ fen: mv.fenBefore, depth: p.brilliancyShallowDepth, multiPv: mv.legalMoveCount, clearHash: true }, signal),
+      this.search({ fen: mv.fenBefore, depth: p.brilliancyDeepDepth, multiPv: 1, searchMoves: [mv.uci], clearHash: true }, signal),
+      this.search({ fen: mv.fenBefore, depth: p.brilliancyDeepDepth, multiPv: 2, clearHash: true }, signal),
+      this.search({ fen: mv.fenBefore, depth: p.recheckDepth, multiPv: 2, clearHash: true }, signal),
+    ]);
     const shallow: ShallowSample[] = shallowRun.byDepth
       .filter((d) => d.depth <= p.brilliancyShallowDepth && d.lines[0])
       .map((d) => {
@@ -292,15 +341,8 @@ export class GameAnalyser {
           playedScore: idx >= 0 ? d.lines[idx]!.score : undefined,
         };
       });
-    // Same played move, every depth (restricted root search, fresh hash).
-    const trajRun = await this.search(
-      { fen: mv.fenBefore, depth: p.brilliancyDeepDepth, multiPv: 1, searchMoves: [mv.uci], clearHash: true },
-      signal,
-    );
     const trajectory = trajRun.byDepth.filter((d) => d.lines[0]).map((d) => ({ depth: d.depth, score: d.lines[0]!.score }));
-    const deepRoot = await this.search({ fen: mv.fenBefore, depth: p.brilliancyDeepDepth, multiPv: 2, clearHash: true }, signal);
     const playedDeep = trajRun.lines[0]?.score ?? deepRoot.lines[0]!.score;
-    const recheckRoot = await this.search({ fen: mv.fenBefore, depth: p.recheckDepth, multiPv: 2, clearHash: true }, signal);
     let recheckPlayed = recheckRoot.lines.find((l) => l.pvUci[0] === mv.uci)?.score;
     if (!recheckPlayed) {
       const r = await this.search({ fen: mv.fenBefore, depth: p.recheckDepth, multiPv: 1, searchMoves: [mv.uci], clearHash: true }, signal);
@@ -332,6 +374,18 @@ export class GameAnalyser {
       sacrifice: detectSacrifice(mv.fenBefore, line),
     };
   }
+}
+
+/**
+ * Splits 0..count-1 into runs of consecutive indices: about two runs per engine, so engines that
+ * finish early can pick up another run while keeping most of the hash reuse.
+ */
+export function consecutiveChunks(count: number, engines: number): number[][] {
+  const runs = Math.max(1, Math.min(count, engines === 1 ? 1 : engines * 2));
+  const size = Math.ceil(count / runs);
+  const out: number[][] = [];
+  for (let start = 0; start < count; start += size) out.push(Array.from({ length: Math.min(size, count - start) }, (_, k) => start + k));
+  return out;
 }
 
 function throwIfAborted(signal?: AbortSignal) {

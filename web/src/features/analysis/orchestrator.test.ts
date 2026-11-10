@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parseSingleGame } from '../../core/chess/pgn';
 import { EngineClient } from '../../core/engine/EngineClient';
+import { EnginePool } from '../../core/engine/EnginePool';
 import { materialEngineTransport } from '../../test/materialEngine';
 import { MemoryAnalysisCache, analysisCacheKey, canonicalFen } from './cache';
-import { GameAnalyser } from './orchestrator';
+import { GameAnalyser, consecutiveChunks } from './orchestrator';
 import { PRESETS, type GameAnalysis } from './types';
 
 const QUEEN_BLUNDER = `[White "W"]
@@ -73,5 +74,32 @@ describe('cache keys', () => {
     expect(a).not.toBe(analysisCacheKey('sf-lite', { fen, depth: 12, multiPv: 3 }));
     expect(a).not.toBe(analysisCacheKey('sf-lite', { fen, depth: 12, multiPv: 2, searchMoves: ['e7e5'] }));
     expect(a).toBe(analysisCacheKey('sf-lite', { fen: fen.replace(' 0 1', ' 0 7'), depth: 12, multiPv: 2 }));
+  });
+});
+
+describe('GameAnalyser with an engine pool', () => {
+  it('gives the same labels as a single engine', async () => {
+    const game = parseSingleGame(QUEEN_BLUNDER, { source: 'pgn-paste' });
+    const single = await new GameAnalyser(new EngineClient(materialEngineTransport, 'material'), new MemoryAnalysisCache(), preset).run(game);
+    const pool = new EnginePool(() => new EngineClient(materialEngineTransport, 'material'), 3);
+    const updates: GameAnalysis[] = [];
+    const parallel = await new GameAnalyser(pool, new MemoryAnalysisCache(), preset).run(game, { onUpdate: (s) => updates.push(s) });
+    expect(parallel.phase).toBe('done');
+    expect(parallel.moves.map((m) => m!.category)).toEqual(single.moves.map((m) => m!.category));
+    expect(parallel.positionEvals).toEqual(single.positionEvals);
+    const firstPass = updates.filter((u) => u.phase === 'first-pass').map((u) => u.progress.done);
+    expect(Math.max(...firstPass)).toBe(5); // all 5 positions counted
+  });
+});
+
+describe('consecutiveChunks', () => {
+  it('one engine walks the whole game in order', () => {
+    expect(consecutiveChunks(5, 1)).toEqual([[0, 1, 2, 3, 4]]);
+  });
+  it('splits into runs of consecutive positions, about two per engine, covering every index once', () => {
+    const chunks = consecutiveChunks(34, 6);
+    expect(chunks.length).toBeLessThanOrEqual(12);
+    expect(chunks.flat()).toEqual(Array.from({ length: 34 }, (_, i) => i));
+    for (const c of chunks) expect(c.every((v, k) => k === 0 || v === c[k - 1]! + 1)).toBe(true);
   });
 });

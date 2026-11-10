@@ -18,12 +18,12 @@ Requires Node 20+.
 
 ```bash
 cd web
-npm install          # also copies the Stockfish lite WASM engine into public/engines
+npm install          # also copies the Stockfish lite and full WASM engines into public/engines
 npm run dev          # http://localhost:5173
 ```
 
 Other scripts: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, `npm run preview`.
-To also offer the 95 MB full engine: `COPY_FULL_ENGINE=1 npm install`, then build or run with `VITE_FULL_ENGINE=1`.
+The 95 MB full engine is always offered and only downloaded when chosen. "Parallel engines" runs several single-threaded engines on different positions at once.
 
 The app remembers your Chess.com and Lichess usernames, imported games and analyses in this browser (localStorage and IndexedDB). Each device keeps its own copy. On any board, **Lichess ↗** opens the current position on the Lichess analysis board. On phones you can swipe across the board to step through moves.
 

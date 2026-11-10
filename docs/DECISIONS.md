@@ -18,7 +18,12 @@ Running log of implementation decisions, deviations from `CHESS_ANALYSER_HANDOFF
 
 - **Monorepo:** `web/` (Phase 1 + 1.5 frontend), `backend/` (Phase 2 Django + Phase 3 cloud app), `shared/` (cross-language test fixtures), `docs/`. The handoff suggested a single `chess-analyser/` root. We split frontend and backend so each has its own toolchain. The handoff stays in `docs/` rather than being copied to the root.
 - **Frontend:** React 19, Vite 8, TypeScript 6.0 (not 7: `typescript-eslint` supports `<6.1`), chess.js 1.4, react-chessboard 5, idb 8, Vitest 5, Playwright 1.65 (configured, no e2e specs yet).
-- **Engine:** `stockfish@19.0.1` (nmrugg, GPL-3.0). The default is **lite single-threaded** (1.7 MB, no COOP/COEP needed), copied to `public/engines/` by a postinstall script. The ~95 MB **full single-threaded** build is opt-in (`COPY_FULL_ENGINE=1 npm install`) and selectable in the UI. Multi-threaded builds are not shipped, since they need cross-origin isolation.
+- **Engine:** `stockfish@19.0.1` (nmrugg, GPL-3.0). **Lite single-threaded** (1.7 MB, default) and **full single-threaded** (~95 MB, only downloaded when chosen) are both copied to `public/engines/` by a postinstall script and always offered.
+- **Speed comes from parallel engines, not threads.** Stockfish's threads make a search stronger in the same time but do not reach a fixed depth sooner, and our labels use fixed depths. Measured in Node on a 6-core/12-thread i7-7800X (lite multi-threaded build, 4 positions):
+  - to depth 16: 1 thread 1.75 s, 6 threads 5.76 s with the default 16 MB hash, 2.02 s with 256 MB;
+  - to depth 20 (256 MB): 1 thread 6.3 s, 6 threads 12.0 s;
+  - 1 s per position: 6 threads searched 5.7x more nodes but reached about the same depth.
+  The Stockfish docs agree: thread gains are measured as strength at equal time. Several **single-threaded** engines on different positions did 12 positions to depth 16 in 4.27 s (1 engine), 1.77 s (4), 1.43 s (6), 1.45 s (11). So the app runs an `EnginePool` of single-threaded engines ("Parallel engines" setting: default cores − 1, at most 6; full build at most 2 for memory). The first pass, the deep pass, the brilliancy candidates and the four searches inside each brilliancy check run in parallel. Every search stays single-threaded and reproducible, no cross-origin isolation is needed, and cache keys are unchanged. Multi-threaded builds are not shipped.
 - **Backend:** Django 6.1, DRF 3.18 (token auth), django-filter, Celery 5.7 + Redis, PostgreSQL through `DATABASE_URL` (SQLite for dev/tests), `chess` 1.11 (python-chess), httpx. Managed with `uv`.
 - **Node** was not installed on the dev machine. Node 24 LTS was installed to `~/.local/node` from the official tarball (SHA-256 verified). Put `~/.local/node/bin` on `PATH`.
 - **Dev-only audit warning:** `npm audit` reports a moderate `minimatch` advisory pulled in through ESLint 10. It is dev-only, and the suggested fix downgrades ESLint. Left as is.
@@ -121,7 +126,7 @@ the original idea more closely: **limit the look-ahead to 1–3 plies and requir
   - A sticky bottom bar has large ⏮ ◀ ▶ ⏭ ⇅ and Lichess buttons. Swiping on the board steps moves, or steps through the engine line while previewing one.
   - The current-move panel comes right under the board, and tap targets are 40–44 px.
   - The desktop layout is unchanged.
-- **GitHub Pages:** `BASE_PATH` sets Vite's `base`. `.github/workflows/deploy-pages.yml` derives it from the repository name (`/` for a `<user>.github.io` repo) and deploys `web/dist`. A `/chess-analyser/` build was verified in the browser: the engine loaded from the sub-folder and an analysis ran. Only the lite engine is published. The full-engine option is shown only when built with `VITE_FULL_ENGINE=1`.
+- **GitHub Pages:** `BASE_PATH` sets Vite's `base`. `.github/workflows/deploy-pages.yml` derives it from the repository name (`/` for a `<user>.github.io` repo) and deploys `web/dist`. A `/chess-analyser/` build was verified in the browser: the engine loaded from the sub-folder and an analysis ran. Both the lite and the full engine are published; the full one is only downloaded when a user picks it.
 - **Privacy:** the original Chess.com test handle was replaced with `example_player` in the docs and test fixtures.
 
 ## Review UI (third round)

@@ -15,12 +15,21 @@ export const ENGINE_BUILDS: Record<EngineFlavour, { label: string; path: string;
   },
 };
 
+/** Both builds are always shipped; the ~95 MB full build is only downloaded when chosen. */
+export const AVAILABLE_FLAVOURS: EngineFlavour[] = ['lite-single', 'full-single'];
+
 /**
- * Builds actually shipped with this deployment. The ~95 MB full build is only copied when
- * installing with COPY_FULL_ENGINE=1, so it is offered only when built with VITE_FULL_ENGINE=1.
+ * Default number of parallel engines: one per core, leaving one for the page, at most 6 (no
+ * measurable gain beyond the physical cores). The 95 MB full build uses ~2 because of memory.
  */
-export const AVAILABLE_FLAVOURS: EngineFlavour[] =
-  import.meta.env.VITE_FULL_ENGINE === '1' ? ['lite-single', 'full-single'] : ['lite-single'];
+export function defaultEngineCount(flavour: EngineFlavour, cores = globalThis.navigator?.hardwareConcurrency ?? 2): number {
+  return Math.max(1, Math.min(maxEngineCount(flavour, cores), Math.min(6, cores - 1)));
+}
+
+/** Upper bound offered in the UI. */
+export function maxEngineCount(flavour: EngineFlavour, cores = globalThis.navigator?.hardwareConcurrency ?? 2): number {
+  return Math.max(1, Math.min(flavour === 'full-single' ? 2 : 8, cores));
+}
 
 /** Runs Stockfish.js in a dedicated Web Worker; UCI lines travel over postMessage. */
 export function createWorkerTransport(flavour: EngineFlavour): EngineTransport {

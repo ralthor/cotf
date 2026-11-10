@@ -254,6 +254,12 @@ export function GameView({ game, renderExtra }: GameViewProps) {
                   {AVAILABLE_FLAVOURS.map((k) => <option key={k} value={k}>{ENGINE_BUILDS[k].label} · {ENGINE_BUILDS[k].approxSize}</option>)}
                 </select>
               </label>
+              <label className="small row" title="Single-threaded engines analysing different positions at the same time.">
+                Parallel engines
+                <select value={engine.engineCount} onChange={(e) => engine.setEngineCount(Number(e.target.value))} disabled={running}>
+                  {Array.from({ length: engine.maxEngineCount }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
               {!running ? (

@@ -1,7 +1,7 @@
 // Copies the Stockfish.js WASM engine (GPL-3.0) from node_modules into public/engines
 // so it is served as a static asset next to its .wasm file.
-// Default: lite single-threaded build (~1.7 MB, no cross-origin isolation needed).
-// Set COPY_FULL_ENGINE=1 to also copy the ~95 MB full single-threaded build.
+// Copies the lite (~1.7 MB) and full (~95 MB) single-threaded builds. The full build is only
+// downloaded by a browser when the user picks it.
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,8 +16,7 @@ if (!existsSync(src)) {
 }
 mkdirSync(dest, { recursive: true });
 
-const flavours = ['stockfish-19-lite-single'];
-if (process.env.COPY_FULL_ENGINE === '1') flavours.push('stockfish-19-single');
+const flavours = ['stockfish-19-lite-single', 'stockfish-19-single'];
 
 for (const name of flavours) {
   for (const ext of ['.js', '.wasm']) {

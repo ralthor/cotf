@@ -1,6 +1,6 @@
 # Algorithms and test cases
 
-Implementations: TypeScript in `web/src/core/*`, Python port in `backend/analysis/scoring.py` and `backend/cloud/brilliancy.py`. Version strings: `cls-v1`, `acc-v1`, `brill-v2`. Change a version whenever behaviour changes.
+Implementations: TypeScript in `web/src/core/*`, Python port in `backend/analysis/scoring.py` and `backend/cloud/brilliancy.py`. Version strings: `cls-v1`, `acc-v1`, `brill-v3`. Change a version whenever behaviour changes.
 
 ## Review pipeline (browser `GameAnalyser`, cloud `CloudGameAnalyser`)
 
@@ -22,7 +22,7 @@ Implementations: TypeScript in `web/src/core/*`, Python port in `backend/analysi
 | UCI | `web/src/core/engine/engine.test.ts` | info parsing (multipv, cp, mate, bounds, wdl), bestmove `(none)`, `go … searchmoves`, handshake, same-depth MultiPV, request serialisation, cancel → stop → bestmove, restart on unacknowledged stop, invalid FEN, checkmate/stalemate |
 | Perspective & labels | `classify.test.ts`, `shared/classifier-cases.json` (both languages) | Black-move sign handling, tiers, ties, forced moves, allowed mate, missed mate, slower mate, brilliant only if best |
 | Accuracy | `classify.test.ts`, `test_scoring.py` | monotonic, ≥ 5 moves, provisional, forced moves ignored, reference value 80.6 |
-| Brilliancy | `brilliancy.test.ts`, `test_brilliancy.py` | looks like a mistake within the 3-ply horizon but decisive best → brilliant; low rank in an already-winning position → none; obvious move → none; refuted sacrifice → none; found within the horizon → none; 1-ply horizon (Qb8+); no recheck → candidate; unstable recheck → none; Black perspective; ordinals; sacrifice vs. exchange |
+| Brilliancy | `brilliancy.test.ts`, `test_brilliancy.py` | looks like a mistake within the 3-ply horizon but decisive best → brilliant; low rank in an already-winning position → none; obvious move → none; refuted sacrifice → none; found within the horizon → none; 1-ply horizon (Qb8+); no recheck → candidate; unstable recheck → none; Black perspective; ordinals; sacrifice vs. exchange; v3: queen sac + mate in one (1-ply horizon) → brilliant; same quick payoff without a sacrifice or with a rook → none; hanging queen passes looks-bad; queen-trade offer is not a sacrifice; quiet move leaving a piece hanging is a sacrifice; sacrifice bonus scales with size |
 | Orchestration | `orchestrator.test.ts` (2-ply material fake engine) | hanging queen → blunder / capture → best, searchmoves fallback, cache resume, cancel |
 | Import | `import.test.ts`, `test_games.py` | URL builders, UTC month, 429/304, CORS failure message, missing fields, `tcn` tolerated, NDJSON streaming and truncation, unfinished/variant filtering, 60 s Lichess back-off, serialised requests, ETag sync, completed months skipped |
 | Export & storage | `export.test.ts` | annotated PGN round-trips; IndexedDB stores games, analyses and engine results |
@@ -33,5 +33,5 @@ Implementations: TypeScript in `web/src/core/*`, Python port in `backend/analysi
 - Known tactical studies with accepted `!!` moves (positive class), including quiet-move brilliancies with no material sacrifice.
 - Flashy but refuted sacrifices (negative class).
 - Only-moves in defence (unique but obvious, which should usually stay "best").
-- Mate-in-N where the engine finds the mate at depth 1–3 (should not be brilliant).
+- Mate-in-N where the engine finds the mate at depth 1–3: not brilliant, unless it starts with a queen-sized sacrifice (v3).
 - Positions with several equal sacrifices (uniqueness should be low).

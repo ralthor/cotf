@@ -39,7 +39,7 @@ Running log of implementation decisions, deviations from `CHESS_ANALYSER_HANDOFF
 - **Accuracy `acc-v1`:** per move 100·e^(−0.045·loss), averaged over non-forced moves. No value is shown below 5 scored moves, and it is marked provisional until the analysis completes. Provider accuracy is shown in a separate row and is never substituted.
 - **Parity:** `shared/classifier-cases.json` is checked by both the TypeScript and Python test suites.
 
-## Brilliancy (`brill-v2`, experimental)
+## Brilliancy (`brill-v3`, experimental)
 
 v1 used a shallow window of depths 1–8 and treated a low shallow rank as "overlooked". In practice this
 flagged moves in already-winning positions: a move ranked 26th of 34 at +4 while the best was +8 still wins,
@@ -67,6 +67,22 @@ the original idea more closely: **limit the look-ahead to 1–3 plies and requir
   - The old harness example (White already +8): **not brilliant**, because it is not decisive (0.7 points).
 - In whole-game review, candidates are best-labelled moves with at least two of: preferred differently by the
   first pass within the horizon, decisive at the first pass, or a sacrifice.
+- **v3, sliding horizon (sacrifice size):** how far a move is from a normal thought process depends on what
+  it gives up. Players calculate knight sacrifices; almost nobody looks even one move past losing the queen.
+  - Sacrifice size D (pawns) is the larger of the deficit along the engine line and what the opponent can win
+    by capturing right after the move (static exchange, `offered`).
+  - **D ≥ 8 (queen): horizon 1 ply.** A queen sacrifice followed by mate in one can be brilliant. For these,
+    *looks-bad* also passes when the opponent can simply win ≥ 5 by taking (e.g. queen for a rook), since a
+    1-ply Stockfish search may already see a very short mate.
+  - **D < 8 and quiet moves: unchanged** (the full shallow horizon, 3 plies).
+  - Sacrifice detection: the deficit may last a single reply when the line ends in mate (otherwise 2, so a
+    queen trade is not a sacrifice). A quiet move that leaves a piece hanging (`offered ≥ 2`) now counts, so
+    such moves are considered as candidates more often; the checks themselves are the same.
+  - Score: the sacrifice component is 5 + 10 · min(D, 9) / 9 instead of a flat 15.
+  - The *decisive* check still applies, deliberately kept strict: a queen sacrifice in a position where another
+    move also wins for sure is not brilliant. Example (real engine, d20): Philidor's 1.Qg8+!! Rxg8 2.Nf7# passes
+    every other check with the 1-ply horizon but is *not brilliant*, because 1.Nf7+ also mates (in 4), so the
+    gap to the second-best move is 0. A "fastest mate counts as decisive" rule was considered and rejected.
 - **Known limit:** Stockfish "depth 3" still includes quiescence search and a strong NNUE evaluation, so it sees
   more than a human looking 3 plies ahead. A material-only shallow search would model a human more literally.
 

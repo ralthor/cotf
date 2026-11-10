@@ -1,4 +1,4 @@
-"""Python port of web/src/core/brilliancy (brill-v1). Keep the two in sync; see docs/ALGORITHM_AND_TEST_CASES.md."""
+"""Python port of web/src/core/brilliancy (brill-v3). Keep the two in sync; see docs/ALGORITHM_AND_TEST_CASES.md."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import chess
 
 from analysis.scoring import expected_score, sort_key
 
-BRILLIANCY_VERSION = "brill-v2"
+BRILLIANCY_VERSION = "brill-v3"
 POLICY = {
     "horizon": 3,
     "min_shallow_loss_pct": 10,
@@ -16,6 +16,9 @@ POLICY = {
     "sound_tolerance_pct": 8,
     "min_sustained_depths": 3,
     "stability_tolerance_pct": 6,
+    "big_sacrifice_min": 8,
+    "big_sacrifice_horizon": 1,
+    "big_sacrifice_hanging_min": 5,
 }
 VALUES = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
 
@@ -27,12 +30,47 @@ def material_balance(board: chess.Board, colour: bool) -> int:
     return bal if colour == chess.WHITE else -bal
 
 
+ATTACKER_ORDER = {**VALUES, chess.KING: 100}
+
+
+def static_exchange(board: chess.Board, square: int) -> int:
+    """Material the side to move wins by starting a capture sequence on `square` (least valuable
+    attacker first, free to stop). Legal moves only, so pins and checks are respected."""
+    gains: list[int] = []
+    made = 0
+    while True:
+        caps = [m for m in board.legal_moves
+                if m.to_square == square and board.piece_at(square) is not None and not board.is_en_passant(m)]
+        if not caps:
+            break
+        cap = min(caps, key=lambda m: ATTACKER_ORDER[board.piece_type_at(m.from_square)])
+        gains.append(VALUES[board.piece_type_at(square)])
+        board.push(cap)
+        made += 1
+    for _ in range(made):
+        board.pop()
+    res = 0
+    for g in reversed(gains):
+        res = max(0, g - res)
+    return res
+
+
+def _max_capture_gain(board: chess.Board) -> int:
+    victim = not board.turn
+    best = 0
+    for sq, piece in board.piece_map().items():
+        if piece.color == victim and piece.piece_type != chess.KING:
+            best = max(best, static_exchange(board, sq))
+    return best
+
+
 def detect_sacrifice(fen_before: str, line_uci: list[str], min_deficit: int = 2, min_checkpoints: int = 2,
                      max_plies: int = 10) -> dict:
+    """Mirrors detectSacrifice() in web/src/core/brilliancy/sacrifice.ts."""
     board = chess.Board(fen_before)
     mover = board.turn
     start = material_balance(board, mover)
-    max_deficit = run = best_run = inspected = 0
+    max_deficit = run = best_run = inspected = offered = 0
     for uci in line_uci[:max_plies]:
         try:
             move = chess.Move.from_uci(uci)
@@ -42,6 +80,9 @@ def detect_sacrifice(fen_before: str, line_uci: list[str], min_deficit: int = 2,
             break
         board.push(move)
         inspected += 1
+        if inspected == 1:
+            gained_by_move = material_balance(board, mover) - start
+            offered = max(0, _max_capture_gain(board) - gained_by_move)
         if board.turn != mover:
             continue
         deficit = start - material_balance(board, mover)
@@ -51,18 +92,35 @@ def detect_sacrifice(fen_before: str, line_uci: list[str], min_deficit: int = 2,
             max_deficit = max(max_deficit, deficit)
         else:
             run = 0
-    is_sac = best_run >= min_checkpoints and max_deficit >= min_deficit
+    ends_in_mate = inspected > 0 and board.is_checkmate() and board.turn != mover
+    line_sac = best_run >= (1 if ends_in_mate else min_checkpoints) and max_deficit >= min_deficit
+    offered_sac = offered >= min_deficit
+    is_sac = line_sac or offered_sac
+    size = max(max_deficit if line_sac else 0, offered if offered_sac else 0)
+    parts = []
+    if line_sac:
+        parts.append(
+            f"Mover gives up {max_deficit} pawn(s) of material and mates." if ends_in_mate and best_run < min_checkpoints
+            else f"Mover stays {max_deficit} pawn(s) of material down for {best_run} replies along the engine line."
+        )
+    if offered_sac:
+        parts.append(f"After the move the opponent can win {offered} pawn(s) of material by capturing.")
+    if is_sac:
+        note = " ".join(parts)
+    elif inspected == 0:
+        note = "No line available to inspect."
+    else:
+        note = "No sustained material deficit; captures and exchanges balance out."
     return {
         "isSacrifice": is_sac,
         "maxDeficit": max_deficit,
         "persistedCheckpoints": best_run,
         "finalDelta": material_balance(board, mover) - start,
+        "endsInMate": ends_in_mate,
+        "offered": offered,
+        "size": size,
         "inspectedPlies": inspected,
-        "note": (
-            f"Mover stays {max_deficit} pawn(s) of material down for {best_run} replies along the engine line."
-            if is_sac
-            else "No sustained material deficit; captures and exchanges balance out."
-        ),
+        "note": note,
     }
 
 
@@ -76,7 +134,7 @@ def ordinal(n: int) -> str:
 
 
 def evaluate_brilliance(inp: dict, policy: dict = POLICY) -> dict:
-    """Mirrors evaluateBrilliance() in web/src/core/brilliancy/detector.ts (brill-v2, camelCase keys)."""
+    """Mirrors evaluateBrilliance() in web/src/core/brilliancy/detector.ts (brill-v3, camelCase keys)."""
     mover = inp["mover"]
     played_uci = inp["playedUci"]
     deep = inp["deep"]
@@ -84,8 +142,15 @@ def evaluate_brilliance(inp: dict, policy: dict = POLICY) -> dict:
     reasons: list[str] = []
 
     # 1. Shallow view (depths 1..horizon of a full-width search)
-    shallow = sorted((s for s in inp["shallow"] if s["depth"] >= 1), key=lambda s: s["depth"])
-    horizon = shallow[-1]["depth"] if shallow else 0
+    sac_in = inp.get("sacrifice") or {}
+    sacrifice = bool(sac_in.get("isSacrifice"))
+    sacrifice_size = (sac_in.get("size", sac_in.get("maxDeficit", 0)) or 0) if sacrifice else 0
+    offered = sac_in.get("offered", 0) or 0
+    big_sacrifice = sacrifice_size >= policy["big_sacrifice_min"]
+    sampled = sorted((s for s in inp["shallow"] if s["depth"] >= 1), key=lambda s: s["depth"])
+    full_horizon = sampled[-1]["depth"] if sampled else 0
+    horizon = min(full_horizon, policy["big_sacrifice_horizon"]) if big_sacrifice else full_horizon
+    shallow = [s for s in sampled if s["depth"] <= horizon]
     view = []
     for s in shallow:
         best_pct = _pct(s["bestScore"], mover)
@@ -101,12 +166,18 @@ def evaluate_brilliance(inp: dict, policy: dict = POLICY) -> dict:
         })
     at_h = view[-1] if view else None
     shallow_loss = at_h["lossPct"] if at_h else None
+    looks_bad_engine = shallow_loss is not None and shallow_loss >= policy["min_shallow_loss_pct"]
+    looks_bad_hanging = big_sacrifice and offered >= policy["big_sacrifice_hanging_min"]
+    horizon_note = f" (short horizon for a {sacrifice_size}-pawn sacrifice)" if big_sacrifice else ""
+    detail = "The played move was not measured at shallow depth." if shallow_loss is None else (
+        f"Searching {horizon} {'ply' if horizon == 1 else 'plies'} ahead{horizon_note}, the move looks {shallow_loss:.1f} pts "
+        f"worse than {at_h['bestUci']} (needs ≥ {policy['min_shallow_loss_pct']}).")
+    if looks_bad_hanging and not looks_bad_engine:
+        detail += f" The opponent can take {offered} pawns of material outright."
     gates.append({
         "name": "looks-bad-at-shallow-depth",
-        "passed": shallow_loss is not None and shallow_loss >= policy["min_shallow_loss_pct"],
-        "detail": "The played move was not measured at shallow depth." if shallow_loss is None else
-        f"Searching {horizon} {'ply' if horizon == 1 else 'plies'} ahead, the move looks {shallow_loss:.1f} pts "
-        f"worse than {at_h['bestUci']} (needs ≥ {policy['min_shallow_loss_pct']}).",
+        "passed": looks_bad_engine or looks_bad_hanging,
+        "detail": detail,
     })
 
     # 2. Best at depth
@@ -179,8 +250,6 @@ def evaluate_brilliance(inp: dict, policy: dict = POLICY) -> dict:
             "detail": f"Recheck at depth {recheck['depth']}: {re_played:.1f}% vs {deep_played:.1f}%.",
         })
 
-    sacrifice = bool((inp.get("sacrifice") or {}).get("isSacrifice"))
-
     def clamp01(x: float) -> float:
         return max(0.0, min(1.0, x))
 
@@ -188,7 +257,7 @@ def evaluate_brilliance(inp: dict, policy: dict = POLICY) -> dict:
         30 * clamp01((shallow_loss or 0) / 30)
         + 25 * clamp01((inversion or 0) / 40)
         + 20 * clamp01((gap if gap is not None else policy["min_uniqueness_pct"]) / 25)
-        + 15 * (1 if sacrifice else 0)
+        + ((5 + 10 * min(sacrifice_size, 9) / 9) if sacrifice else 0)
         + 10 * clamp01(((discovery or 0) - horizon) / 8)
     )
     hard = all(g["passed"] for g in gates if g["name"] != "stable-on-recheck")
@@ -196,7 +265,7 @@ def evaluate_brilliance(inp: dict, policy: dict = POLICY) -> dict:
     if hard:
         verdict = "brilliant" if stable is True else "candidate" if stable is None else "none"
 
-    if shallow_loss is not None and shallow_loss >= policy["min_shallow_loss_pct"]:
+    if looks_bad_engine:
         rank = at_h["playedRank"]
         rank_txt = f"; {ordinal(rank)} of {at_h['legalMoves']} moves" if rank else ""
         reasons.append(f"A {horizon}-ply look rates it a mistake ({shallow_loss:.1f} pts worse than {at_h['bestUci']}{rank_txt}).")
@@ -231,6 +300,8 @@ def evaluate_brilliance(inp: dict, policy: dict = POLICY) -> dict:
             "discoveryDepth": discovery,
             "discoveryInterval": interval,
             "sacrifice": sacrifice,
+            "sacrificeSize": sacrifice_size,
+            "offered": offered,
             "stable": stable,
         },
         "gates": gates,

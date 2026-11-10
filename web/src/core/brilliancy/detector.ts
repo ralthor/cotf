@@ -4,15 +4,19 @@ import { expectedScore, sortKey } from '../scoring/score';
 import type { SacrificeEvidence } from './sacrifice';
 
 /**
- * EXPERIMENTAL brilliancy heuristic (version brill-v2). A research heuristic, not a definition of
+ * EXPERIMENTAL brilliancy heuristic (version brill-v3). A research heuristic, not a definition of
  * human brilliance. See docs/ALGORITHM_AND_TEST_CASES.md.
  *
  * Idea: look at the position the way a player who calculates only 1–3 plies would (the
  * "shallow horizon"). If the played move looks like a clear mistake there, but a full-depth
  * search finds it is the best move, decisively better than the alternatives, and only becomes
  * sound beyond the horizon, it is a brilliant candidate.
+ *
+ * brill-v3: the horizon slides with the size of the sacrifice. Players rarely look even one
+ * move past giving up their queen, so a queen-sized sacrifice (≥ 8 pawns) only needs to look bad
+ * within 1 ply (e.g. queen sac, then mate in one); everything else keeps the full shallow horizon.
  */
-export const BRILLIANCY_VERSION = 'brill-v2';
+export const BRILLIANCY_VERSION = 'brill-v3';
 
 /** One depth (≤ horizon) of a full-width search: every legal move scored at this depth. */
 export type ShallowSample = {
@@ -82,6 +86,10 @@ export type BrillianceEvidence = {
     discoveryDepth: number | null;
     discoveryInterval: [number, number] | null;
     sacrifice: boolean;
+    /** Sacrifice size in pawns (0 when no sacrifice). */
+    sacrificeSize: number;
+    /** Material the opponent could win by capturing right after the move. */
+    offered: number;
     stable: boolean | null;
   };
   gates: { name: string; passed: boolean; detail: string }[];
@@ -100,6 +108,12 @@ export const BRILLIANCY_POLICY = {
   soundTolerancePct: 8, // trajectory point counts as "sound" if within this of the deep value
   minSustainedDepths: 3,
   stabilityTolerancePct: 6,
+  /** Sacrifices at least this big (pawns: a queen) use the short horizon below. */
+  bigSacrificeMin: 8,
+  /** Horizon (plies) for big sacrifices: nobody looks past "I lose my queen". */
+  bigSacrificeHorizon: 1,
+  /** …and also "look bad" if the opponent can simply win this much by taking (e.g. queen for a rook). */
+  bigSacrificeHangingMin: 5,
 };
 
 const pct = (s: EngineScore, c: Colour) => expectedScore(s, c) * 100;
@@ -116,8 +130,14 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
   const reasons: string[] = [];
 
   // --- 1. Shallow view (depths 1..horizon) ---------------------------------------------------
-  const shallow = [...input.shallow].filter((s) => s.depth >= 1).sort((a, b) => a.depth - b.depth);
-  const horizon = shallow.length ? shallow[shallow.length - 1]!.depth : 0;
+  const sacrifice = input.sacrifice?.isSacrifice ?? false;
+  const sacrificeSize = sacrifice ? (input.sacrifice!.size ?? input.sacrifice!.maxDeficit) : 0;
+  const offered = input.sacrifice?.offered ?? 0;
+  const bigSacrifice = sacrificeSize >= policy.bigSacrificeMin;
+  const sampled = [...input.shallow].filter((s) => s.depth >= 1).sort((a, b) => a.depth - b.depth);
+  const fullHorizon = sampled.length ? sampled[sampled.length - 1]!.depth : 0;
+  const horizon = bigSacrifice ? Math.min(fullHorizon, policy.bigSacrificeHorizon) : fullHorizon;
+  const shallow = sampled.filter((s) => s.depth <= horizon);
   const shallowView: ShallowViewRow[] = shallow.map((s) => {
     const bestPct = pct(s.bestScore, mover);
     const playedPct = s.playedScore ? pct(s.playedScore, mover) : null;
@@ -133,13 +153,18 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
   });
   const atHorizon = shallowView[shallowView.length - 1];
   const shallowLossPct = atHorizon?.lossPct ?? null;
+  const looksBadByEngine = shallowLossPct !== null && shallowLossPct >= policy.minShallowLossPct;
+  // A queen that can simply be taken looks like a blunder to a human, whatever a 1-ply search says.
+  const looksBadByHanging = bigSacrifice && offered >= policy.bigSacrificeHangingMin;
+  const horizonNote = bigSacrifice ? ` (short horizon for a ${sacrificeSize}-pawn sacrifice)` : '';
   gates.push({
     name: 'looks-bad-at-shallow-depth',
-    passed: shallowLossPct !== null && shallowLossPct >= policy.minShallowLossPct,
+    passed: looksBadByEngine || looksBadByHanging,
     detail:
-      shallowLossPct === null
+      (shallowLossPct === null
         ? 'The played move was not measured at shallow depth.'
-        : `Searching ${horizon} ${horizon === 1 ? 'ply' : 'plies'} ahead, the move looks ${shallowLossPct.toFixed(1)} pts worse than ${atHorizon!.bestUci} (needs ≥ ${policy.minShallowLossPct}).`,
+        : `Searching ${horizon} ${horizon === 1 ? 'ply' : 'plies'} ahead${horizonNote}, the move looks ${shallowLossPct.toFixed(1)} pts worse than ${atHorizon!.bestUci} (needs ≥ ${policy.minShallowLossPct}).`) +
+      (looksBadByHanging && !looksBadByEngine ? ` The opponent can take ${offered} pawns of material outright.` : ''),
   });
 
   // --- 2. Deep quality ------------------------------------------------------------------------
@@ -211,13 +236,12 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
     });
   }
 
-  const sacrifice = input.sacrifice?.isSacrifice ?? false;
   const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
   const score =
     30 * clamp01((shallowLossPct ?? 0) / 30) +
     25 * clamp01((inversionPct ?? 0) / 40) +
     20 * clamp01((uniquenessGapPct ?? policy.minUniquenessPct) / 25) +
-    15 * (sacrifice ? 1 : 0) +
+    (sacrifice ? 5 + 10 * Math.min(sacrificeSize, 9) / 9 : 0) +
     10 * clamp01(((discoveryDepth ?? 0) - horizon) / 8);
 
   // Verdict = the checks. The score only ranks how strong the evidence is.
@@ -225,7 +249,7 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
   let verdict: BrillianceVerdict = 'none';
   if (hardGatesPassed) verdict = stable === true ? 'brilliant' : stable === null ? 'candidate' : 'none';
 
-  if (shallowLossPct !== null && shallowLossPct >= policy.minShallowLossPct) {
+  if (looksBadByEngine && shallowLossPct !== null) {
     const rank = atHorizon?.playedRank;
     reasons.push(
       `A ${horizon}-ply look rates it a mistake (${shallowLossPct.toFixed(1)} pts worse than ${atHorizon!.bestUci}${rank ? `; ${ordinal(rank)} of ${atHorizon!.legalMoves} moves` : ''}).`,
@@ -259,6 +283,8 @@ export function evaluateBrilliance(input: BrillianceInput, policy = BRILLIANCY_P
       discoveryDepth,
       discoveryInterval,
       sacrifice,
+      sacrificeSize,
+      offered,
       stable,
     },
     gates,

@@ -60,7 +60,7 @@ export function BrillianceDetails({ evidence }: { evidence: BrillianceEvidence }
                   : '—'}
             </td>
           </tr>
-          <tr><th>Material sacrifice</th><td>{s.sacrifice ? 'yes' : 'no'}</td></tr>
+          <tr><th>Material sacrifice</th><td>{s.sacrifice ? (s.sacrificeSize ? `yes, ${s.sacrificeSize} pawn(s)` : 'yes') : 'no'}</td></tr>
           <tr><th>Stable on deeper recheck</th><td>{s.stable === null ? 'not checked' : s.stable ? 'yes' : 'no'}</td></tr>
         </tbody>
       </table>

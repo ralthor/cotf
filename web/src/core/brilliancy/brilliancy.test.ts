@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateBrilliance, ordinal, type BrillianceInput, type ShallowSample } from './detector';
-import { detectSacrifice, materialBalance } from './sacrifice';
+import { detectSacrifice, materialBalance, type SacrificeEvidence } from './sacrifice';
 import type { EngineScore } from '../engine/types';
 
 const cp = (value: number): EngineScore => ({ kind: 'cp', value, perspective: 'white' });
@@ -39,7 +39,7 @@ function base(overrides: Partial<BrillianceInput> = {}): BrillianceInput {
   };
 }
 
-describe('evaluateBrilliance (brill-v2, shallow horizon)', () => {
+describe('evaluateBrilliance (brill-v3, shallow horizon)', () => {
   it('a move that looks like a blunder within 3 plies but is the decisive best move is brilliant', () => {
     const e = evaluateBrilliance(base());
     expect(e.verdict).toBe('brilliant');
@@ -157,5 +157,93 @@ describe('detectSacrifice', () => {
   it('an exchange with recapture is not a sacrifice', () => {
     const s = detectSacrifice('r2q2k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1', ['a1a8', 'd8a8', 'h2h3', 'h7h6']);
     expect(s.isSacrifice).toBe(false);
+  });
+});
+
+/** Philidor's smothered mate: 1.Qg8+!! Rxg8 2.Nf7#. */
+const SMOTHERED = '3r3k/6pp/7N/8/2Q5/8/6PP/6K1 w - - 0 1';
+
+describe('detectSacrifice (brill-v3 additions)', () => {
+  it('a queen sacrifice that mates next move counts after a single reply', () => {
+    const s = detectSacrifice(SMOTHERED, ['c4g8', 'd8g8', 'h6f7']);
+    expect(s.endsInMate).toBe(true);
+    expect(s.persistedCheckpoints).toBe(1);
+    expect(s.isSacrifice).toBe(true);
+    expect(s.size).toBe(9);
+    expect(s.offered).toBe(7); // queen for a rook by static exchange (Rxg8 Nxg8 Kxg8)
+  });
+  it('offering a queen trade is not a sacrifice', () => {
+    const s = detectSacrifice('3q2k1/5ppp/8/8/Q7/8/5PPP/3R2K1 w - - 0 1', ['a4d7', 'd8d7', 'd1d7', 'h7h6']);
+    expect(s.isSacrifice).toBe(false);
+    expect(s.offered).toBe(0);
+  });
+  it('a quiet move that leaves a piece hanging is a sacrifice', () => {
+    const s = detectSacrifice('4r1k1/5ppp/8/4N3/8/8/5PPP/6K1 w - - 0 1', ['h2h3']);
+    expect(s.isSacrifice).toBe(true);
+    expect(s.offered).toBe(3);
+    expect(s.size).toBe(3);
+  });
+  it('a defended piece is not hanging', () => {
+    const s = detectSacrifice('4r1k1/5ppp/8/4N3/3P4/8/5PP1/6K1 w - - 0 1', ['g2g3']);
+    expect(s.offered).toBe(0);
+    expect(s.isSacrifice).toBe(false);
+  });
+});
+
+describe('sliding horizon (brill-v3)', () => {
+  const m2: EngineScore = { kind: 'mate', moves: 2, winner: 'w', perspective: 'white' };
+  const sac = (size: number, offered = size): SacrificeEvidence => ({
+    isSacrifice: true,
+    maxDeficit: size,
+    persistedCheckpoints: 1,
+    finalDelta: -size,
+    endsInMate: true,
+    offered,
+    size,
+    inspectedPlies: 3,
+    note: 'test sacrifice',
+  });
+  /** Looks bad only at depth 1; the engine sees the mate from depth 2. */
+  const quickMate = (sacrifice?: SacrificeEvidence) =>
+    base({
+      shallow: shallow([
+        [-800, 300, 35],
+        [9000, 300, 1],
+        [9000, 300, 1],
+      ]),
+      trajectory: [cp(-800), ...Array.from({ length: 12 }, () => m2)].map((score, i) => ({ depth: i + 1, score })),
+      deep: { depth: 13, bestUci: 'f3e5', bestScore: m2, secondScore: cp(300), playedScore: m2 },
+      recheck: { depth: 15, bestUci: 'f3e5', bestScore: m2, playedScore: m2 },
+      sacrifice,
+    });
+
+  it('a queen sacrifice with a short mate is brilliant (1-ply horizon)', () => {
+    const e = evaluateBrilliance(quickMate(sac(9)));
+    expect(e.signals.horizon).toBe(1);
+    expect(e.signals.sacrificeSize).toBe(9);
+    expect(e.signals.discoveryInterval).toEqual([1, 2]);
+    expect(e.verdict).toBe('brilliant');
+  });
+  it('the same quick payoff without a big sacrifice is not brilliant (3-ply horizon)', () => {
+    expect(evaluateBrilliance(quickMate()).signals.horizon).toBe(3);
+    expect(evaluateBrilliance(quickMate()).verdict).toBe('none');
+    const rook = evaluateBrilliance(quickMate(sac(5)));
+    expect(rook.signals.horizon).toBe(3);
+    expect(rook.verdict).toBe('none');
+  });
+  it('a hanging queen looks bad even when the 1-ply search already likes the move', () => {
+    const input = quickMate(sac(9));
+    input.shallow = shallow([[300, 300, 1]]);
+    const e = evaluateBrilliance(input);
+    expect(e.gates.find((g) => g.name === 'looks-bad-at-shallow-depth')!.passed).toBe(true);
+    const notHanging = evaluateBrilliance({ ...input, sacrifice: sac(9, 0) });
+    expect(notHanging.gates.find((g) => g.name === 'looks-bad-at-shallow-depth')!.passed).toBe(false);
+  });
+  it('the sacrifice bonus scales with size', () => {
+    const small = evaluateBrilliance(base({ sacrifice: sac(3) })).score;
+    const big = evaluateBrilliance(base({ sacrifice: sac(5) })).score;
+    const none = evaluateBrilliance(base()).score;
+    expect(none).toBeLessThan(small);
+    expect(small).toBeLessThan(big);
   });
 });

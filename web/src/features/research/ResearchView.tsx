@@ -20,6 +20,8 @@ const cache = new IdbAnalysisCache();
 const EXAMPLES = [
   { label: "Légal's trap: 5.Nxe5!", fen: 'rn1qkbnr/ppp2p1p/3p2p1/4p3/2B1P1b1/2N2N2/PPPP1PPP/R1BQK2R w KQkq - 0 5', move: 'Nxe5', horizon: 3 },
   { label: 'Opera Game: 16.Qb8+!!', fen: '4kb1r/p2n1ppp/4q3/4p1B1/4P3/1Q6/PPP2PPP/2KR4 w k - 0 16', move: 'Qb8+', horizon: 1 },
+  // brill-v3: a queen sacrifice uses a 1-ply horizon even when 3 plies are searched.
+  { label: "Philidor's smothered mate: Qg8+!!", fen: '3r3k/6pp/7N/8/2Q5/8/6PP/6K1 w - - 0 1', move: 'Qg8+', horizon: 3 },
 ];
 
 function toMove(fen: string, moveText: string): MoveRecord {

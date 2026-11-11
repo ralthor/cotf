@@ -161,3 +161,21 @@ the original idea more closely: **limit the look-ahead to 1–3 plies and requir
   brilliancy shortlist.
 - **Browser only for now:** the Python classifier, the cloud analyser and the shared classifier fixture do not know
   "great" yet. Older saved analyses (no `greatVersion`) show no great moves until they are re-run.
+
+## Why was this move bad? (why-v1)
+
+- **Separate and on demand:** a "Why was this bad?" button for inaccuracies, mistakes and blunders, and a "Show threat"
+  button for any position. Results are kept for the session only; the engine searches are cached as usual, so asking
+  again is quick. The stored game analysis is never changed.
+- **Threats from a null-move search:** the opponent's best move if the player could pass. Only concrete threats count
+  (captures, checks, mates, material), so a quiet improving move is not called a threat.
+- **Causes:** ignored a threat, missed the only good move, missed an opportunity, allowed a tactic, positional. Rules and
+  thresholds are in `docs/ALGORITHM_AND_TEST_CASES.md`.
+- **Board view:** "Why was this bad?" switches the main board to the position before the move, with a
+  "Before … | After" toggle (resets on navigation; the eval bar follows). Arrows: red for the opponent's threats (up to
+  3), orange for the move played, green for the better move. "Show threat" draws red arrows on the current position.
+  Threats are shown with arrows, not played on the board.
+- **Numbers the user knows:** the card shows eval-bar values ("eval +0.51 → +1.08", "if ignored, the eval goes
+  +0.61 → +2.00"), never the internal expected-score points.
+- **Opera Game checks:** 3...Bg4 ignored the threat dxe5; 6...Nf6 stopped Qxf7# but allowed Qb3 (positional);
+  10...cxb5 missed Qb4+ and allowed Bxb5+ (the engine's line wins Black's queen for a bishop).

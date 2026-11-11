@@ -19,6 +19,7 @@ import { BrillianceDetails, EvidenceModal, GreatDetails } from '../../components
 import { annotatedPgn, analysisJson, downloadText, safeFilename } from '../analysis/export';
 import { PRESETS, type GameAnalysis, type PresetId } from '../analysis/types';
 import { useGameAnalysis } from '../analysis/useGameAnalysis';
+import { useMoveExplainer, whyBadKey } from '../explain/useMoveExplainer';
 
 type PvPreview = { baseFen: string; moves: string[]; index: number };
 
@@ -41,6 +42,13 @@ export type GameViewProps = {
   renderExtra?: (ctx: { game: GameRecord; analysis: GameAnalysis | null; setAnalysis: (a: GameAnalysis) => void }) => ReactNode;
 };
 
+/** Arrow colours on the main board. */
+const ARROW = {
+  best: 'rgba(60,125,58,0.85)',
+  threat: 'rgba(179,38,30,0.85)',
+  played: 'rgba(208,102,28,0.85)',
+};
+
 export function GameView({ game, renderExtra }: GameViewProps) {
   const positions = useMemo(() => positionsOf(game), [game]);
   // The parent keys this component by game id, so state resets when the game changes.
@@ -56,13 +64,17 @@ export function GameView({ game, renderExtra }: GameViewProps) {
     setPref('alwaysShowBest', v ? '1' : null);
   };
   const [explainPly, setExplainPly] = useState<number | null>(null);
+  // "Why was this bad?" shows the position before the move on the main board (resets on navigation).
+  const [beforeAt, setBeforeAt] = useState<number | null>(null);
   const { analysis, setAnalysis, running, start, cancel } = useGameAnalysis(game);
   const engine = useEngine();
+  const explainer = useMoveExplainer();
   const { ref: boardRef, width: boardWidth } = useBoardWidth();
 
   const go = useCallback(
     (p: number) => {
       setPv(null);
+      setBeforeAt(null);
       setPos(Math.max(0, Math.min(positions.length - 1, p)));
     },
     [positions.length],
@@ -115,31 +127,47 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   const lastAnalysis = pos > 0 ? analysis?.moves[pos - 1] : undefined;
   const nextAnalysis = analysis?.moves[pos]; // analysis of the position on the board (pre-move for ply pos+1)
   const currentLines: EngineLine[] = useMemo(() => nextAnalysis?.lines ?? [], [nextAnalysis]);
-  const fen = pv ? fenAfterLine(pv.baseFen, pv.moves.slice(0, pv.index)) : positions[pos]!;
+  const lastWhyBad = lastMove ? explainer.whyBad[whyBadKey(lastMove)] : undefined;
+  const whyBadReport = lastWhyBad?.status === 'done' ? lastWhyBad.value : undefined;
+  const showBefore = !pv && beforeAt === pos && !!lastMove && !!whyBadReport;
+  const fen = pv ? fenAfterLine(pv.baseFen, pv.moves.slice(0, pv.index)) : showBefore ? lastMove!.fenBefore : positions[pos]!;
 
   // Reveals reset whenever the shown position changes.
   const revealBetter = reveal.pos === pos && reveal.better;
   const revealHint = reveal.pos === pos && reveal.hint;
   const showHintArrow = (revealHint || alwaysShow) && !pv;
 
+  const boardThreat = explainer.threats[positions[pos]!];
   const arrows = useMemo(() => {
-    if (!showHintArrow) return [];
-    const best = currentLines[0]?.pvUci[0];
-    return best ? [{ startSquare: best.slice(0, 2), endSquare: best.slice(2, 4), color: 'rgba(60,125,58,0.8)' }] : [];
-  }, [showHintArrow, currentLines]);
+    const out: { startSquare: string; endSquare: string; color: string }[] = [];
+    const add = (uci: string | undefined, color: string) => {
+      if (uci) out.push({ startSquare: uci.slice(0, 2), endSquare: uci.slice(2, 4), color });
+    };
+    if (pv) return out;
+    if (showBefore && whyBadReport && lastMove) {
+      // Before the move: the opponent's threats (red), the move played (orange), the better move (green).
+      for (const t of whyBadReport.threats) add(t.uci, ARROW.threat);
+      add(lastMove.uci, ARROW.played);
+      add(whyBadReport.bestUci, ARROW.best);
+      return out;
+    }
+    if (showHintArrow) add(currentLines[0]?.pvUci[0], ARROW.best);
+    if (boardThreat?.status === 'done') for (const t of boardThreat.value?.real ?? []) add(t.uci, ARROW.threat);
+    return out;
+  }, [showHintArrow, currentLines, boardThreat, pv, showBefore, whyBadReport, lastMove]);
 
   // Category badge on the square where the moved piece landed.
   const badge =
-    !pv && lastMove && lastAnalysis?.category
+    !pv && !showBefore && lastMove && lastAnalysis?.category
       ? { ...squarePosition(lastMove.uci.slice(2, 4), orientation), category: lastAnalysis.category }
       : null;
 
   const squareStyles = useMemo(() => {
-    if (!lastMove || pv) return {};
+    if (!lastMove || pv || showBefore) return {};
     const color = lastAnalysis?.category ? `var(--cat-${lastAnalysis.category})` : 'var(--accent)';
     const style = { boxShadow: `inset 0 0 0 4px ${color}` };
     return { [lastMove.uci.slice(0, 2)]: { ...style, opacity: 0.9 }, [lastMove.uci.slice(2, 4)]: style };
-  }, [lastMove, lastAnalysis, pv]);
+  }, [lastMove, lastAnalysis, pv, showBefore]);
 
   const progressPct = analysis ? Math.round((analysis.progress.done / Math.max(1, analysis.progress.total)) * 100) : 0;
   const title = gameTitle(game);
@@ -158,10 +186,10 @@ export function GameView({ game, renderExtra }: GameViewProps) {
 
       <div className="review">
         <div className="eval-bar-v">
-          <EvalBar score={pv ? undefined : analysis?.positionEvals[pos]} orientation={orientation} height={boardWidth} />
+          <EvalBar score={pv ? undefined : analysis?.positionEvals[showBefore ? pos - 1 : pos]} orientation={orientation} height={boardWidth} />
         </div>
         <div className="board-col">
-          <EvalStrip score={pv ? undefined : analysis?.positionEvals[pos]} />
+          <EvalStrip score={pv ? undefined : analysis?.positionEvals[showBefore ? pos - 1 : pos]} />
           <div ref={boardRef} className="board-wrap" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
             <Chessboard
               options={{
@@ -226,6 +254,22 @@ export function GameView({ game, renderExtra }: GameViewProps) {
             onPlayLine={(baseFen, moves) => setPv({ baseFen, moves, index: 1 })}
             onExplainBrilliance={lastMove ? () => setExplainPly(lastMove.ply) : undefined}
             analysed={!!analysis}
+            whyBad={lastWhyBad}
+            onWhyBad={
+              lastMove
+                ? () => {
+                    setBeforeAt(pos);
+                    if (!lastWhyBad || lastWhyBad.status === 'error') void explainer.explainMove(lastMove);
+                  }
+                : undefined
+            }
+            showingBefore={showBefore}
+            onShowBefore={(on) => {
+              setPv(null);
+              setBeforeAt(on ? pos : null);
+            }}
+            threat={boardThreat}
+            onFindThreat={lastMove?.san.endsWith('#') ? undefined : () => void explainer.findThreat(positions[pos]!)}
           />
           {analysis && (
             <div className="panel" style={{ marginTop: 12, padding: 8 }}>

@@ -23,6 +23,21 @@ All gates must pass (expected-score points, mover's view):
 An obvious recapture fails the shallow gate (it already leads by a lot at 1 ply), so it stays "best".
 4. Engine results are cached in IndexedDB. The key covers the canonical FEN, engine build, depth/nodes/movetime, MultiPV, searchmoves, hash-clearing and score convention. Re-running a cancelled analysis resumes from the cache.
 
+## Why was this move bad? (`why-v1`, on demand, `web/src/core/explain/whyBad.ts`)
+
+Runs only when asked, for one inaccuracy/mistake/blunder, and never changes the game analysis. Three searches at the preset's deep depth (through the same engine-result cache): MultiPV 3 from the position before the move, the played move alone (`searchmoves`), and a **threat search**: the same position with the opponent to move (a "null move": side flipped, en passant cleared; not possible in check).
+
+- **Threat:** the opponent's best move after the pass. It is *real* when passing costs ≥ 8 points and it is concrete (a capture, a check, or a line that mates or wins ≥ 1 pawn). With ≤ 2 pieces left it is marked low-confidence (zugzwang).
+- **Causes** (several can apply):
+  - *Ignored a threat:* a real threat, and the opponent's reply to the move is that threat (same move, same target square, or the same mate), or the move ends up within 3 points of passing.
+  - *Missed the only good move:* the best move leads the second-best by ≥ 12 points (the great-move gap).
+  - *Missed an opportunity:* no ignored threat, and the best line mates or wins ≥ 2 pawns, ≥ 2 more than the played line.
+  - *Allowed a tactic:* no ignored threat, and the played line loses ≥ 2 pawns, both outright and compared with the best line, or gets mated.
+  - *Positional:* none of the above.
+- Material is counted after the opponent's reply (an even ply, ≤ 6) and never in the middle of an exchange (following captures are included).
+- **Several threats:** the threat search uses MultiPV 3; every real line is a threat (up to 3), and the played move is checked against each.
+- **Show threat** works on any position: the same threat search, with red arrows on the board.
+
 ## Perspective
 
 - Stored scores are white-relative. A score is converted to the mover's view only to compare it. `moveLoss` uses the mover's view for both the best and the played score.
@@ -38,6 +53,7 @@ An obvious recapture fails the shallow gate (it already leads by a lot at 1 ply)
 | Accuracy | `classify.test.ts`, `test_scoring.py` | monotonic, ≥ 5 moves, provisional, forced moves ignored, reference value 80.6 |
 | Brilliancy | `brilliancy.test.ts`, `test_brilliancy.py` | looks like a mistake within the 3-ply horizon but decisive best → brilliant; low rank in an already-winning position → none; obvious move → none; refuted sacrifice → none; found within the horizon → none; 1-ply horizon (Qb8+); no recheck → candidate; unstable recheck → none; Black perspective; ordinals; sacrifice vs. exchange; v3: queen sac + mate in one (1-ply horizon) → brilliant; same quick payoff without a sacrifice or with a rook → none; hanging queen passes looks-bad; queen-trade offer is not a sacrifice; quiet move leaving a piece hanging is a sacrifice; sacrifice bonus scales with size |
 | Great moves | `great.test.ts`, `classify.test.ts` | hidden decisive move → great; obvious recapture → none; small deep lead → none; not best → none; already-won position (saturation) → none; only drawing defence → great; lost position → none; recheck required; Black perspective; forced → none; brilliant outranks great; great requires best |
+| Why bad / threats | `whyBad.test.ts`, `explainer.test.ts` | null move (flip, en passant, in check); exchange-safe material count; ignored threat (White and Black); allowed tactic; missed opportunity + only move; shared capture is no opportunity; unstoppable mate is not ignored; positional; in check; quiet move is no threat; one-pawn threat counts; threat handled; hanging queen with a pawn threat → allowed tactic (material engine) |
 | Orchestration | `orchestrator.test.ts` (2-ply material fake engine) | hanging queen → blunder / capture → best, searchmoves fallback, cache resume, cancel |
 | Import | `import.test.ts`, `test_games.py` | URL builders, UTC month, 429/304, CORS failure message, missing fields, `tcn` tolerated, NDJSON streaming and truncation, unfinished/variant filtering, 60 s Lichess back-off, serialised requests, ETag sync, completed months skipped |
 | Export & storage | `export.test.ts` | annotated PGN round-trips; IndexedDB stores games, analyses and engine results |

@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ordinal, type BrillianceEvidence } from '../core/brilliancy/detector';
+import type { GreatEvidence } from '../core/brilliancy/great';
 
 const n1 = (v: number | null) => (v === null ? '—' : v.toFixed(1));
 
@@ -81,7 +82,51 @@ export function BrillianceDetails({ evidence }: { evidence: BrillianceEvidence }
   );
 }
 
-export function BrillianceModal({ evidence, title, onClose }: { evidence: BrillianceEvidence; title: string; onClose: () => void }) {
+const signed = (v: number | null) => (v === null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}`);
+
+export function GreatDetails({ evidence }: { evidence: GreatEvidence }) {
+  const s = evidence.signals;
+  return (
+    <div className="stack">
+      <p>
+        <strong>{evidence.verdict === 'great' ? 'Great move' : 'Not great'}</strong> · {evidence.version}
+      </p>
+      <table className="data">
+        <tbody>
+          <tr>
+            <th>Lead over the next move, {s.horizon}-ply look</th>
+            <td>
+              {signed(s.shallowLeadPct)} pts{s.shallowRivalUci ? ` vs ${s.shallowRivalUci}` : ''}
+              {s.shallowRank && s.legalMoves ? ` (${ordinal(s.shallowRank)} of ${s.legalMoves})` : ''}
+            </td>
+          </tr>
+          <tr>
+            <th>Lead over the next move, full depth</th>
+            <td>
+              {signed(s.deepGapPct)} pts{s.deepRivalUci ? ` vs ${s.deepRivalUci}` : ''}
+            </td>
+          </tr>
+          <tr><th>Lead on deeper recheck</th><td>{signed(s.recheckGapPct)} pts</td></tr>
+          <tr><th>Expected score (mover)</th><td>{n1(s.deepExpectedPct)}%</td></tr>
+        </tbody>
+      </table>
+      <h3>Checks</h3>
+      <ul className="small">
+        {evidence.gates.map((g) => (
+          <li key={g.name}>
+            <span className={g.passed ? 'pass' : 'fail'}>{g.passed ? '✔' : '✘'}</span> <strong>{g.name}</strong>: {g.detail}
+          </li>
+        ))}
+      </ul>
+      <p className="small muted">
+        Experimental: the best move, far better than every alternative at full depth, while a search limited to {s.horizon} plies
+        cannot tell it apart from them. Treat this as evidence, not a verdict.
+      </p>
+    </div>
+  );
+}
+
+export function EvidenceModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.focus();
@@ -96,7 +141,7 @@ export function BrillianceModal({ evidence, title, onClose }: { evidence: Brilli
           <h2 style={{ margin: 0 }}>{title}</h2>
           <button type="button" onClick={onClose}>Close</button>
         </div>
-        <BrillianceDetails evidence={evidence} />
+        {children}
       </div>
     </div>
   );

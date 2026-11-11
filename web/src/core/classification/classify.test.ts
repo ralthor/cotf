@@ -44,6 +44,12 @@ describe('classification tiers', () => {
     expect(classifyMove({ mover: 'w', playedUci: 'x', bestUci: 'x', best: cp(400), played: cp(400), brilliant: true }).category).toBe('brilliant');
     expect(classifyMove({ mover: 'w', playedUci: 'x', bestUci: 'y', best: cp(400), played: cp(0), brilliant: true }).category).not.toBe('brilliant');
   });
+  it('great requires the move to be best, and brilliant outranks it', () => {
+    expect(classifyMove({ mover: 'w', playedUci: 'x', bestUci: 'x', best: cp(150), played: cp(150), great: true }).category).toBe('great');
+    expect(classifyMove({ mover: 'w', playedUci: 'x', bestUci: 'y', best: cp(400), played: cp(0), great: true }).category).toBe('blunder');
+    expect(classifyMove({ mover: 'w', playedUci: 'x', bestUci: 'x', best: cp(150), played: cp(150), great: true, brilliant: true }).category).toBe('brilliant');
+    expect(classifyMove({ mover: 'w', playedUci: 'x', bestUci: 'x', best: cp(150), played: cp(150), great: true, forced: true }).category).toBe('best');
+  });
 });
 
 describe('mate handling without fake centipawns', () => {

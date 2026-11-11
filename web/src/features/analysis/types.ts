@@ -1,4 +1,5 @@
 import type { BrillianceEvidence } from '../../core/brilliancy/detector';
+import type { GreatEvidence } from '../../core/brilliancy/great';
 import type { MoveCategory } from '../../core/classification/classify';
 import type { Colour } from '../../core/chess/types';
 import type { EngineLine, EngineScore } from '../../core/engine/types';
@@ -20,6 +21,8 @@ export type AnalysisPreset = {
   movetimeCapMs: number;
   maxDeepPositions: number;
   maxBrilliancyCandidates: number;
+  /** Extra moves checked only for "great" (great moves are more common than brilliant ones). */
+  maxGreatCandidates: number;
 };
 
 export const PRESETS: Record<PresetId, AnalysisPreset> = {
@@ -34,6 +37,7 @@ export const PRESETS: Record<PresetId, AnalysisPreset> = {
     movetimeCapMs: 4_000,
     maxDeepPositions: 20,
     maxBrilliancyCandidates: 3,
+    maxGreatCandidates: 6,
   },
   standard: {
     id: 'standard',
@@ -46,6 +50,7 @@ export const PRESETS: Record<PresetId, AnalysisPreset> = {
     movetimeCapMs: 8_000,
     maxDeepPositions: 40,
     maxBrilliancyCandidates: 6,
+    maxGreatCandidates: 12,
   },
   deep: {
     id: 'deep',
@@ -58,6 +63,7 @@ export const PRESETS: Record<PresetId, AnalysisPreset> = {
     movetimeCapMs: 20_000,
     maxDeepPositions: 60,
     maxBrilliancyCandidates: 8,
+    maxGreatCandidates: 20,
   },
 };
 
@@ -84,6 +90,7 @@ export type MoveAnalysis = {
   provisional: boolean;
   passes: ('first' | 'deep' | 'brilliancy' | 'cloud')[];
   brilliance?: BrillianceEvidence;
+  great?: GreatEvidence;
 };
 
 export type ColourSummary = {
@@ -102,6 +109,8 @@ export type GameAnalysis = {
   policyVersion: string;
   accuracyVersion: string;
   brilliancyVersion: string;
+  /** Missing on analyses made before great moves existed. */
+  greatVersion?: string;
   /** moves[i] analyses ply i+1. */
   moves: (MoveAnalysis | undefined)[];
   /** Best-line evaluation for each of the N+1 positions (white-relative). */

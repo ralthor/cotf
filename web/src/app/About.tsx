@@ -1,5 +1,6 @@
 import { ACCURACY_VERSION } from '../core/scoring/accuracy';
 import { BRILLIANCY_VERSION } from '../core/brilliancy/detector';
+import { GREAT_VERSION } from '../core/brilliancy/great';
 import { CATEGORY_LABELS, CATEGORY_ORDER, DEFAULT_POLICY } from '../core/classification/classify';
 import { CategoryBadge } from '../components/CategoryBadge';
 
@@ -50,6 +51,14 @@ export function About() {
         past giving up their queen, a queen-sized sacrifice only has to look bad within 1 ply, so a queen sacrifice
         followed by a quick mate can be brilliant. Engine depth is not human
         difficulty, so treat this as evidence, not a verdict.
+      </p>
+      <h3>Great moves ({GREAT_VERSION}, experimental)</h3>
+      <p className="small">
+        A great move is the best move, far better than every alternative at full depth (at least 12 points of expected score
+        ahead of the next move, and still clearly ahead on a deeper recheck), while a 1–3 ply look cannot tell it apart from
+        the alternatives (it leads them by less than 4 points there, or even looks worse). An obvious recapture is far
+        better than the alternatives too, but even a 1-ply look sees that, so it stays "best". It uses the same searches as
+        the brilliancy check. A brilliant move is also great, but is shown as brilliant.
       </p>
       <h3>Imports</h3>
       <p className="small">

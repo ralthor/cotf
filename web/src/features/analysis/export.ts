@@ -5,6 +5,7 @@ import type { GameAnalysis } from './types';
 
 const NAG: Partial<Record<MoveCategory, string>> = {
   brilliant: '$3',
+  great: '$1',
   questionable: '$6',
   mistake: '$2',
   blunder: '$4',

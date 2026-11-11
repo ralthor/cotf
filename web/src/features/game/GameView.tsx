@@ -15,7 +15,7 @@ import { EvalBar } from '../../components/EvalBar';
 import { EvalChart } from '../../components/EvalChart';
 import { MoveList, type MoveFilter } from '../../components/MoveList';
 import { Summary } from '../../components/Summary';
-import { BrillianceModal } from '../../components/BrillianceExplainer';
+import { BrillianceDetails, EvidenceModal, GreatDetails } from '../../components/BrillianceExplainer';
 import { annotatedPgn, analysisJson, downloadText, safeFilename } from '../analysis/export';
 import { PRESETS, type GameAnalysis, type PresetId } from '../analysis/types';
 import { useGameAnalysis } from '../analysis/useGameAnalysis';
@@ -298,7 +298,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
                   <option value="all">All</option>
                   <option value="errors">Inaccuracies+</option>
                   <option value="blunders">Blunders</option>
-                  <option value="brilliant">Brilliant / candidates</option>
+                  <option value="brilliant">Brilliant / great</option>
                 </select>
               </label>
             </div>
@@ -325,12 +325,16 @@ export function GameView({ game, renderExtra }: GameViewProps) {
         </div>
       </div>
 
-      {explainMove?.brilliance && (
-        <BrillianceModal
-          evidence={explainMove.brilliance}
-          title={`${explainMove.san}: brilliancy evidence`}
-          onClose={() => setExplainPly(null)}
-        />
+      {explainMove && (explainMove.brilliance?.verdict ?? 'none') !== 'none' ? (
+        <EvidenceModal title={`${explainMove.san}: brilliancy evidence`} onClose={() => setExplainPly(null)}>
+          <BrillianceDetails evidence={explainMove.brilliance!} />
+        </EvidenceModal>
+      ) : (
+        explainMove?.great && (
+          <EvidenceModal title={`${explainMove.san}: great-move evidence`} onClose={() => setExplainPly(null)}>
+            <GreatDetails evidence={explainMove.great} />
+          </EvidenceModal>
+        )
       )}
     </div>
   );

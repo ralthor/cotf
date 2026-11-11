@@ -50,7 +50,7 @@ export function EvalChart({ evals, categories, current, onSelect }: Props) {
       <path d={d} fill="none" stroke="var(--accent)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
       <line x1={0} x2={W} y1={H / 2} y2={H / 2} stroke="var(--muted)" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
       {categories.map((c, i) =>
-        c === 'blunder' || c === 'mistake' || c === 'brilliant' ? (
+        c === 'blunder' || c === 'mistake' || c === 'brilliant' || c === 'great' ? (
           <circle key={i} cx={x(i + 1)} cy={y(evals[i + 1])} r={3.5} fill={`var(--cat-${c})`} vectorEffect="non-scaling-stroke" />
         ) : null,
       )}

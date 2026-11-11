@@ -11,6 +11,7 @@
   --board-light: #e9e2cf;
   --board-dark: #7d8f9b;
   --cat-brilliant: #1e8f8a;
+  --cat-great: #2f6fb0;
   --cat-best: #3c7d3a;
   --cat-good: #6b8f3a;
   --cat-questionable: #c08a16;
@@ -124,6 +125,7 @@ main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 
 .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 700; color: #fff; }
 .badge.brilliant { background: var(--cat-brilliant); }
+.badge.great { background: var(--cat-great); }
 .badge.best { background: var(--cat-best); }
 .badge.good { background: var(--cat-good); }
 .badge.questionable { background: var(--cat-questionable); }

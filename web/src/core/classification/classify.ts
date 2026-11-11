@@ -2,12 +2,13 @@ import type { Colour } from '../chess/types';
 import type { EngineScore } from '../engine/types';
 import { moveLoss, type MoveLoss } from '../scoring/score';
 
-export type MoveCategory = 'brilliant' | 'best' | 'good' | 'questionable' | 'mistake' | 'blunder';
+export type MoveCategory = 'brilliant' | 'great' | 'best' | 'good' | 'questionable' | 'mistake' | 'blunder';
 
-export const CATEGORY_ORDER: MoveCategory[] = ['brilliant', 'best', 'good', 'questionable', 'mistake', 'blunder'];
+export const CATEGORY_ORDER: MoveCategory[] = ['brilliant', 'great', 'best', 'good', 'questionable', 'mistake', 'blunder'];
 
 export const CATEGORY_LABELS: Record<MoveCategory, { label: string; glyph: string; description: string }> = {
   brilliant: { label: 'Brilliant', glyph: '!!', description: 'Hard-to-find, deeply verified strong move (experimental detector).' },
+  great: { label: 'Great', glyph: '!', description: 'Far better than every alternative, though a 1–3 ply look cannot tell them apart.' },
   best: { label: 'Best', glyph: '★', description: 'Engine top choice or effectively tied with it.' },
   good: { label: 'Good', glyph: '✓', description: 'Small loss of expected score.' },
   questionable: { label: 'Inaccuracy', glyph: '?!', description: 'Noticeable loss, not severe (a.k.a. questionable).' },
@@ -47,6 +48,8 @@ export type ClassificationInput = {
   forced?: boolean;
   /** Outcome of the brilliancy detector, if it ran. */
   brilliant?: boolean;
+  /** Outcome of the great-move detector, if it ran. Brilliant wins when both are set. */
+  great?: boolean;
 };
 
 export type Classification = {
@@ -56,7 +59,7 @@ export type Classification = {
   policyVersion: string;
 };
 
-/** Priority decision tree: brilliant → best → mate rules → loss thresholds. */
+/** Priority decision tree: brilliant → great → best → mate rules → loss thresholds. */
 export function classifyMove(input: ClassificationInput, policy: ClassifierPolicy = DEFAULT_POLICY): Classification {
   const loss = moveLoss(input.best, input.played, input.mover);
   const reasons: string[] = [];
@@ -80,6 +83,10 @@ export function classifyMove(input: ClassificationInput, policy: ClassifierPolic
   if (input.brilliant && (isTop || tied)) {
     reasons.push('Passed the depth-reversal brilliancy checks and is best at the deepest search.');
     return done('brilliant');
+  }
+  if (input.great && !input.forced && (isTop || tied)) {
+    reasons.push('Far better than every alternative at depth, which a shallow look cannot see.');
+    return done('great');
   }
   if (input.forced) {
     reasons.push('Only legal move.');

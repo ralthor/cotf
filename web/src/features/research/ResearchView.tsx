@@ -6,7 +6,8 @@ import type { MoveRecord } from '../../core/chess/types';
 import type { EngineLine } from '../../core/engine/types';
 import { expectedScore, formatScore } from '../../core/scoring/score';
 import { useEngine } from '../../app/EngineContext';
-import { BrillianceDetails } from '../../components/BrillianceExplainer';
+import { BrillianceDetails, GreatDetails } from '../../components/BrillianceExplainer';
+import { evaluateGreat, type GreatEvidence } from '../../core/brilliancy/great';
 import { IdbAnalysisCache } from '../../storage/db';
 import { GameAnalyser } from '../analysis/orchestrator';
 import { PRESETS } from '../analysis/types';
@@ -59,7 +60,7 @@ export function ResearchView() {
   const [deepDepth, setDeepDepth] = useState(20);
   const [recheckDepth, setRecheckDepth] = useState(22);
   const [live, setLive] = useState<{ depth: number; lines: EngineLine[]; done: boolean } | null>(null);
-  const [evidence, setEvidence] = useState<{ input: BrillianceInput; result: BrillianceEvidence } | null>(null);
+  const [evidence, setEvidence] = useState<{ input: BrillianceInput; result: BrillianceEvidence; great: GreatEvidence } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'' | 'analyse' | 'brilliancy'>('');
   const abortRef = useRef<AbortController | null>(null);
@@ -114,7 +115,7 @@ export function ResearchView() {
         recheckDepth,
       };
       const input = await new GameAnalyser(engine, cache, preset).collectBrillianceInput(mv, ac.signal);
-      setEvidence({ input, result: evaluateBrilliance(input) });
+      setEvidence({ input, result: evaluateBrilliance(input), great: evaluateGreat(input) });
     } catch (e) {
       if ((e as { code?: string }).code !== 'cancelled') setError((e as Error).message);
     } finally {
@@ -226,6 +227,8 @@ export function ResearchView() {
           {evidence && (
             <>
               <BrillianceDetails evidence={evidence.result} />
+              <h3>Great move?</h3>
+              <GreatDetails evidence={evidence.great} />
               <h3>Depth trajectory (mover's perspective)</h3>
               <div style={{ overflowX: 'auto' }}>
                 <table className="data">

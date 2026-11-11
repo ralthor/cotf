@@ -10,7 +10,7 @@ function matches(a: MoveAnalysis | undefined, f: MoveFilter): boolean {
   if (!a?.category) return false;
   if (f === 'blunders') return a.category === 'blunder';
   if (f === 'errors') return a.category === 'mistake' || a.category === 'blunder' || a.category === 'questionable';
-  return a.category === 'brilliant' || a.brilliance?.verdict === 'candidate';
+  return a.category === 'brilliant' || a.category === 'great' || a.brilliance?.verdict === 'candidate';
 }
 
 export function MoveList({

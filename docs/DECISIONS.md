@@ -148,3 +148,16 @@ the original idea more closely: **limit the look-ahead to 1–3 plies and requir
   board if it is off-screen. Before this, the game opened above the list, out of view, and seemed not to
   import. Fetched lists mark games already in your list with "✓ in your games".
 - **Fixed:** the ✕ (remove) button in the games list took the full row width, squeezing titles.
+
+## Great moves (great-v1)
+
+- **Definition:** the best move, far better than every alternative at full depth, while a 1–3 ply look cannot tell it
+  apart from them. Gates and thresholds are in `docs/ALGORITHM_AND_TEST_CASES.md`.
+- **Same searches as brilliancy:** both detectors read one `collectBrillianceInput` result. The shallow search now
+  also records the best move other than the played one at each depth, and the deep searches record the second move.
+- **Priority:** brilliant → great → best. A brilliant move meets the great conditions too, but only "Brilliant" is shown.
+  Great is a best move, so accuracy is unchanged.
+- **Budget:** great-only candidates have their own per-preset limit (`maxGreatCandidates`: 6 / 12 / 20), on top of the
+  brilliancy shortlist.
+- **Browser only for now:** the Python classifier, the cloud analyser and the shared classifier fixture do not know
+  "great" yet. Older saved analyses (no `greatVersion`) show no great moves until they are re-run.

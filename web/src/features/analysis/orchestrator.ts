@@ -6,6 +6,7 @@ import {
   type ShallowSample,
   BRILLIANCY_POLICY,
 } from '../../core/brilliancy/detector';
+import { evaluateGreat, GREAT_POLICY, GREAT_VERSION, type GreatEvidence } from '../../core/brilliancy/great';
 import { detectSacrifice } from '../../core/brilliancy/sacrifice';
 import {
   classifyMove,
@@ -78,6 +79,7 @@ export class GameAnalyser {
       policyVersion: this.policy.version,
       accuracyVersion: ACCURACY_VERSION,
       brilliancyVersion: BRILLIANCY_VERSION,
+      greatVersion: GREAT_VERSION,
       moves: new Array(n).fill(undefined),
       positionEvals: new Array(n + 1).fill(undefined),
       phase: 'loading-engine',
@@ -143,25 +145,26 @@ export class GameAnalyser {
         emit();
       });
 
-      // ---- Pass 3: experimental brilliancy detector on a few candidates ----
+      // ---- Pass 3: experimental brilliant / great detectors on a few candidates ----
+      // Both read the same depth-by-depth evidence, so one set of searches serves both.
       if (!opts.skipBrilliancy) {
         state.phase = 'brilliancy';
-        const candidates = this.brilliancyCandidates(game, state, roots);
+        const candidates = this.specialMoveCandidates(game, state, roots);
         done = 0;
-        state.progress = { done: 0, total: candidates.length, label: `Brilliancy check 0/${candidates.length}` };
+        state.progress = { done: 0, total: candidates.length, label: `Brilliant/great check 0/${candidates.length}` };
         emit();
         // Each check's own searches also run in parallel, so one candidate at a time per ~4 engines.
         await forEachConcurrent(candidates, Math.max(1, Math.ceil(this.parallel / 4)), async (idx) => {
           throwIfAborted(signal);
           let result;
           try {
-            result = await this.checkBrilliance(game.moves[idx]!, signal);
+            result = await this.checkSpecialMove(game.moves[idx]!, signal);
           } catch (e) {
             if (e instanceof EngineError && e.code === 'cancelled') throw e;
             return; // a failed research check never blocks the review
           } finally {
             done++;
-            state.progress = { done, total: candidates.length, label: `Brilliancy check ${done}/${candidates.length}` };
+            state.progress = { done, total: candidates.length, label: `Brilliant/great check ${done}/${candidates.length}` };
           }
           const current = state.moves[idx]!;
           const reclass = classifyMove(
@@ -172,15 +175,19 @@ export class GameAnalyser {
               best: current.bestScore!,
               played: current.playedScore!,
               forced: current.forced,
-              brilliant: result.verdict === 'brilliant',
+              brilliant: result.brilliance.verdict === 'brilliant',
+              great: result.great.verdict === 'great',
             },
             this.policy,
           );
+          const extra =
+            result.brilliance.verdict !== 'none' ? result.brilliance.reasons : result.great.verdict === 'great' ? result.great.reasons : [];
           state.moves[idx] = {
             ...current,
-            brilliance: result,
+            brilliance: result.brilliance,
+            great: result.great,
             category: reclass.category,
-            reasons: result.verdict !== 'none' ? [...reclass.reasons, ...result.reasons] : reclass.reasons,
+            reasons: [...reclass.reasons, ...extra],
             passes: [...current.passes, 'brilliancy'],
           };
           emit();
@@ -279,6 +286,43 @@ export class GameAnalyser {
     return Math.abs(l - this.policy.goodMaxLossPct) < 1.5;
   }
 
+  /** Moves worth the brilliant/great searches: the brilliancy shortlist plus a great-move shortlist. */
+  private specialMoveCandidates(game: GameRecord, state: GameAnalysis, roots: (PositionAnalysis | undefined)[]): number[] {
+    const brilliant = this.brilliancyCandidates(game, state, roots);
+    const great = this.greatCandidates(game, state, roots)
+      .filter((idx) => !brilliant.includes(idx))
+      .slice(0, this.preset.maxGreatCandidates);
+    return [...brilliant, ...great].sort((a, b) => a - b);
+  }
+
+  /**
+   * Cheap pre-filter from the first pass (MultiPV 2 at every depth): the move is best, leads the
+   * other line by a lot at full depth, but not at the shallow horizon.
+   */
+  private greatCandidates(game: GameRecord, state: GameAnalysis, roots: (PositionAnalysis | undefined)[]): number[] {
+    const horizon = this.preset.brilliancyShallowDepth;
+    const scored: { idx: number; gap: number }[] = [];
+    state.moves.forEach((m, idx) => {
+      if (!m || m.forced || m.category !== 'best' || !m.playedScore) return;
+      const mv = game.moves[idx]!;
+      if (mv.legalMoveCount < 2) return;
+      const pctOf = (l: EngineLine) => expectedScore(l.score, m.colour) * 100;
+      const deepRival = m.lines.find((l) => l.pvUci[0] !== mv.uci);
+      if (!deepRival) return;
+      const gap = expectedScore(m.playedScore, m.colour) * 100 - pctOf(deepRival);
+      // Loose on purpose: the first pass is shallower than the check that decides.
+      if (gap < GREAT_POLICY.minDeepGapPct * 0.6) return;
+      const shallow = (roots[idx]?.byDepth ?? []).filter((d) => d.depth <= horizon && d.lines[0]).at(-1);
+      if (shallow) {
+        const [first, second] = shallow.lines;
+        // Only a clear shallow lead rules it out; with one shallow line we cannot tell.
+        if (first!.pvUci[0] === mv.uci && second && pctOf(first!) - pctOf(second) >= GREAT_POLICY.maxShallowLeadPct * 2) return;
+      }
+      scored.push({ idx, gap });
+    });
+    return scored.sort((a, b) => b.gap - a.gap).map((s) => s.idx);
+  }
+
   private brilliancyCandidates(game: GameRecord, state: GameAnalysis, roots: (PositionAnalysis | undefined)[]): number[] {
     const scored: { idx: number; weight: number }[] = [];
     state.moves.forEach((m, idx) => {
@@ -312,6 +356,12 @@ export class GameAnalyser {
     return evaluateBrilliance(await this.collectBrillianceInput(mv, signal));
   }
 
+  /** Same evidence, both detectors: brilliant and great. */
+  async checkSpecialMove(mv: MoveRecord, signal?: AbortSignal): Promise<{ brilliance: BrillianceEvidence; great: GreatEvidence }> {
+    const input = await this.collectBrillianceInput(mv, signal);
+    return { brilliance: evaluateBrilliance(input), great: evaluateGreat(input) };
+  }
+
   /** Runs the searches the detector needs (all with a cleared hash for reproducibility). */
   async collectBrillianceInput(mv: MoveRecord, signal?: AbortSignal): Promise<BrillianceInput> {
     const p = this.preset;
@@ -331,6 +381,7 @@ export class GameAnalyser {
       .filter((d) => d.depth <= p.brilliancyShallowDepth && d.lines[0])
       .map((d) => {
         const idx = d.lines.findIndex((l) => l.pvUci[0] === mv.uci);
+        const other = d.lines.find((l) => l.pvUci[0] !== mv.uci);
         return {
           depth: d.depth,
           playedRank: idx >= 0 ? d.lines[idx]!.rank : null,
@@ -339,6 +390,8 @@ export class GameAnalyser {
           bestUci: d.lines[0]!.pvUci[0] ?? '',
           bestScore: d.lines[0]!.score,
           playedScore: idx >= 0 ? d.lines[idx]!.score : undefined,
+          bestOtherUci: other?.pvUci[0],
+          bestOtherScore: other?.score,
         };
       });
     const trajectory = trajRun.byDepth.filter((d) => d.lines[0]).map((d) => ({ depth: d.depth, score: d.lines[0]!.score }));
@@ -359,6 +412,7 @@ export class GameAnalyser {
         bestUci: deepRoot.lines[0]?.pvUci[0] ?? '',
         bestScore: deepRoot.lines[0]!.score,
         secondScore: deepRoot.lines[1]?.score,
+        secondUci: deepRoot.lines[1]?.pvUci[0],
         playedScore: playedDeep,
       },
       recheck:
@@ -368,6 +422,7 @@ export class GameAnalyser {
               bestUci: recheckRoot.lines[0].pvUci[0] ?? '',
               bestScore: recheckRoot.lines[0].score,
               secondScore: recheckRoot.lines[1]?.score,
+              secondUci: recheckRoot.lines[1]?.pvUci[0],
               playedScore: recheckPlayed,
             }
           : undefined,

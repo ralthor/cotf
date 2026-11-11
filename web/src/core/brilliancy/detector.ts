@@ -29,6 +29,9 @@ export type ShallowSample = {
   bestScore: EngineScore;
   /** The played move's score at this depth (from the same full-width search). */
   playedScore?: EngineScore;
+  /** The best move other than the played one at this depth (for the great-move check). */
+  bestOtherUci?: string;
+  bestOtherScore?: EngineScore;
 };
 
 /** The played move's own score per depth, from a `go … searchmoves <played>` search. */
@@ -39,6 +42,7 @@ export type DeepVerification = {
   bestUci: string;
   bestScore: EngineScore;
   secondScore?: EngineScore;
+  secondUci?: string;
   playedScore: EngineScore;
 };
 

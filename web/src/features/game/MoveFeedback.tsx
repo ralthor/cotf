@@ -60,7 +60,7 @@ function LineRow({
  */
 export function MoveFeedback(p: Props) {
   const { move, analysis: a } = p;
-  const notBest = !!a?.category && a.category !== 'best' && a.category !== 'brilliant' && !!a.bestMoveUci && a.bestMoveUci !== move?.uci;
+  const notBest = !!a?.category && a.category !== 'best' && a.category !== 'brilliant' && a.category !== 'great' && !!a.bestMoveUci && a.bestMoveUci !== move?.uci;
   const showBetter = p.revealBetter || p.alwaysShow;
   const showHint = p.revealHint || p.alwaysShow;
   const bestLine = a?.lines.find((l) => l.pvUci[0] === a.bestMoveUci) ?? a?.lines[0];
@@ -137,10 +137,17 @@ export function MoveFeedback(p: Props) {
         </div>
       )}
 
-      {a?.brilliance && a.brilliance.verdict !== 'none' && p.onExplainBrilliance && (
+      {a?.brilliance && a.brilliance.verdict !== 'none' && p.onExplainBrilliance ? (
         <button type="button" className="link small" onClick={p.onExplainBrilliance}>
           Why {a.brilliance.verdict === 'brilliant' ? 'brilliant' : 'a candidate'}? See the evidence
         </button>
+      ) : (
+        a?.category === 'great' &&
+        a.great && p.onExplainBrilliance && (
+          <button type="button" className="link small" onClick={p.onExplainBrilliance}>
+            Why great? See the evidence
+          </button>
+        )
       )}
       {move?.comment && <div className="small muted">“{move.comment}”</div>}
 

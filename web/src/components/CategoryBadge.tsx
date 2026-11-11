@@ -1,7 +1,7 @@
 import { CATEGORY_LABELS, type MoveCategory } from '../core/classification/classify';
 
 export function CategoryBadge({ category, candidate }: { category?: MoveCategory; candidate?: boolean }) {
-  if (candidate && category !== 'brilliant') {
+  if (candidate && category !== 'brilliant' && category !== 'great') {
     return (
       <span className="badge candidate" title="Brilliant candidate (not confirmed)">
         !?

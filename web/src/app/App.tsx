@@ -12,6 +12,8 @@ import { CloudAnalysisPanel } from '../features/cloud/CloudAnalysisPanel';
 import { gameStore } from '../storage/db';
 import { EngineProvider } from './EngineContext';
 import { useHashRoute, type Route } from './useHashRoute';
+import { clearDeepLink, importLichessGame, invalidDeepLinkReason, lichessGameRecordId, readDeepLink } from './deepLink';
+import { ImportError } from '../features/import/http';
 import { About, Disclaimer } from './About';
 
 const SAMPLE_PGN_GAME_NOTE = 'Tip: import a PGN or fetch your games from Chess.com or Lichess to begin.';
@@ -32,13 +34,8 @@ function Shell() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const gameColRef = useRef<HTMLDivElement>(null);
   const knownIds = useMemo(() => new Set(games.map((g) => g.id)), [games]);
+  const [linkStatus, setLinkStatus] = useState<{ text: string; error: boolean } | null>(null);
 
-  useEffect(() => {
-    void gameStore.list().then((list) => {
-      setGames(list);
-      if (list[0]) setSelectedId((id) => id ?? list[0]!.id);
-    });
-  }, []);
 
   /** Brings the opened game into view: on phones it sits above the lists, off-screen. */
   const revealGame = () =>
@@ -57,6 +54,43 @@ function Shell() {
     if (window.location.hash !== '#/analyse' && window.location.hash !== '') window.location.hash = '#/analyse';
     revealGame();
   }, []);
+
+  useEffect(() => {
+    // ?lichess=<id or URL> (in the hash or the query): open that game, importing it unless
+    // it's already here. Checked on load and on hash changes (a link clicked while open).
+    const openLinked = async () => {
+      const link = readDeepLink();
+      if (!link) return;
+      clearDeepLink(); // synchronously, so a second run (StrictMode, reload) finds nothing
+      if (link.kind === 'invalid') {
+        setLinkStatus({ text: `Could not open the linked game: ${invalidDeepLinkReason(link.value)}`, error: true });
+        return;
+      }
+      const linked = link.id;
+      const existing = (await gameStore.list()).find((g) => g.id === lichessGameRecordId(linked));
+      if (existing) {
+        setSelectedId(existing.id);
+        revealGame();
+        return;
+      }
+      setLinkStatus({ text: `Importing Lichess game ${linked}…`, error: false });
+      try {
+        onImported([await importLichessGame(linked)]);
+        setLinkStatus(null);
+      } catch (e) {
+        const reason = e instanceof ImportError ? e.message : (e as Error).message;
+        setLinkStatus({ text: `Could not open Lichess game ${linked}: ${reason}`, error: true });
+      }
+    };
+    void gameStore.list().then((list) => {
+      setGames(list);
+      if (list[0]) setSelectedId((id) => id ?? list[0]!.id);
+      void openLinked();
+    });
+    const onHash = () => void openLinked();
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [onImported]);
 
   const select = (id: string) => {
     setSelectedId(id);
@@ -98,6 +132,16 @@ function Shell() {
         {route === 'analyse' && (
           <div className="layout">
             <div className="stack">
+              {linkStatus && (
+                <p className={linkStatus.error ? 'notice error' : 'notice'} role={linkStatus.error ? 'alert' : 'status'}>
+                  {linkStatus.text}
+                  {linkStatus.error && (
+                    <button type="button" className="link small" onClick={() => setLinkStatus(null)}>
+                      Dismiss
+                    </button>
+                  )}
+                </p>
+              )}
               <ImportPanel onImported={onImported} knownIds={knownIds} />
               <section className="panel" aria-labelledby="games-title">
                 <h2 id="games-title">Games ({games.length})</h2>

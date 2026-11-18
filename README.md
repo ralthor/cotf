@@ -43,6 +43,12 @@ You can import games in three ways:
 - Fetch a Chess.com username's monthly archives (these can lag up to about 12 hours).
 - Fetch a Lichess username's games, or paste a Lichess game URL (available immediately after the game ends).
 
+To open a finished Lichess game directly, link to `#/analyse?lichess=<gameId or URL>`, for
+example `https://ralthor.github.io/cotf/#/analyse?lichess=abcdefgh`. The older form
+`https://ralthor.github.io/cotf/?lichess=https://lichess.org/abcdefgh` works too. The game is
+imported (or selected, if it's already in this browser) and the parameter is removed from the
+address. Values that aren't a Lichess game (a study, another site) show an error instead.
+
 ## Backend (optional)
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).

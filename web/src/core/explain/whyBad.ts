@@ -5,6 +5,7 @@ import type { Colour } from '../chess/types';
 import { uciLineToSan } from '../chess/lines';
 import type { EngineScore } from '../engine/types';
 import { expectedScore, formatScore, opponent } from '../scoring/score';
+import { t, tn } from '../../i18n';
 
 /**
  * EXPERIMENTAL "why was this move bad?" explainer (version why-v1). It runs on demand for one
@@ -111,8 +112,9 @@ export type WhyBadInput = {
 };
 
 const pct = (s: EngineScore, c: Colour) => expectedScore(s, c) * 100;
-const colourName = (c: Colour) => (c === 'w' ? 'White' : 'Black');
-const pawns = (n: number) => `${n} pawn${n === 1 ? '' : 's'}`;
+const colourName = (c: Colour) => (c === 'w' ? t('colour.white') : t('colour.black'));
+const winsMaterial = (n: number) => tn('why.winsMaterial', n);
+const forcesMate = (n: number) => t('why.forcesMate', { n });
 
 /** The same position with the other side to move, or undefined when that is not legal (check). */
 export function nullMoveFen(fen: string): string | undefined {
@@ -161,9 +163,9 @@ export function materialSwing(fen: string, uci: string[], colour: Colour, maxPli
 
 /** What a line does for `colour`: "forces mate in 3", "wins 3 pawns of material", or "". */
 function lineEffect(fen: string, line: ExplainLine, colour: Colour, minMaterial = WHY_BAD_POLICY.minMaterial): string {
-  if (line.score.kind === 'mate' && line.score.winner === colour) return `forces mate in ${line.score.moves}`;
+  if (line.score.kind === 'mate' && line.score.winner === colour) return forcesMate(line.score.moves);
   const swing = materialSwing(fen, line.uci, colour);
-  if (swing >= minMaterial) return `wins ${pawns(swing)} of material`;
+  if (swing >= minMaterial) return winsMaterial(swing);
   return '';
 }
 
@@ -245,21 +247,21 @@ export function explainBadMove(input: WhyBadInput, policy = WHY_BAD_POLICY): Why
               : null;
     if (match) {
       ignored = true;
-      const what = threat.effect ? `, which ${threat.effect}` : '';
+      const what = threat.effect ? t('why.which', { effect: threat.effect }) : '';
       const follow =
         match === 'same-move' || match === 'same-square'
-          ? ` ${playedSan} did not stop it: ${refutationSan ?? refutationUci} follows.`
+          ? ` ${t('why.notStopped', { played: playedSan, reply: refutationSan ?? refutationUci })}`
           : match === 'mate'
-            ? ` ${playedSan} did not stop the mate.`
-            : ` ${playedSan} did nothing against it.`;
-      const fix = onlyMove ? ` Only ${bestSan} dealt with it.` : ` ${bestSan} dealt with it.`;
+            ? ` ${t('why.notStoppedMate', { played: playedSan })}`
+            : ` ${t('why.nothingAgainst', { played: playedSan })}`;
+      const fix = ` ${t(onlyMove ? 'why.onlyFix' : 'why.fix', { best: bestSan })}`;
       causes.push({
         kind: 'ignored-threat',
         sizePct: Math.min(lossPct, threat.sizePct),
         match,
         threat,
-        text: `Before ${playedSan}, ${colourName(opp)} threatened ${threat.san}${what}.${follow}${fix}${
-          threat.lowConfidence ? ' (Few pieces are left, so the threat may be overstated: passing is not allowed in chess.)' : ''
+        text: `${t('why.threatened', { played: playedSan, side: colourName(opp), threat: threat.san, what })}${follow}${fix}${
+          threat.lowConfidence ? ` ${t('why.lowConfidence')}` : ''
         }`,
       });
     }
@@ -270,9 +272,12 @@ export function explainBadMove(input: WhyBadInput, policy = WHY_BAD_POLICY): Why
     causes.push({
       kind: 'only-move',
       sizePct: lossPct,
-      text: `${bestSan} was the only good move (eval ${formatScore(best.score)}). The next best, ${
-        uciLineToSan(fenBefore, [second!.uci[0] ?? ''])[0] ?? second!.uci[0]
-      }, only reaches ${formatScore(second!.score)}.`,
+      text: t('why.onlyMove', {
+        best: bestSan,
+        eval: formatScore(best.score),
+        second: uciLineToSan(fenBefore, [second!.uci[0] ?? ''])[0] ?? second!.uci[0] ?? '',
+        secondEval: formatScore(second!.score),
+      }),
     });
   }
 
@@ -286,11 +291,11 @@ export function explainBadMove(input: WhyBadInput, policy = WHY_BAD_POLICY): Why
   // The best line must gain material itself; losing material with the played move is cause 4.
   const gains = bestSwing >= policy.minMaterial && extra >= policy.minMaterial;
   if (!ignored && ((bestMates && !playedMates) || gains)) {
-    const what = bestMates && best.score.kind === 'mate' ? `forces mate in ${best.score.moves}` : `wins ${pawns(bestSwing)} of material`;
+    const what = bestMates && best.score.kind === 'mate' ? forcesMate(best.score.moves) : winsMaterial(bestSwing);
     causes.push({
       kind: 'missed-opportunity',
       sizePct: lossPct,
-      text: `${bestSan} ${what}. ${playedSan} misses it.`,
+      text: t('why.missed', { best: bestSan, what, played: playedSan }),
     });
   }
 
@@ -304,13 +309,13 @@ export function explainBadMove(input: WhyBadInput, policy = WHY_BAD_POLICY): Why
       // The material is won over the engine's whole line, not necessarily by the reply alone.
       const effect =
         playedMated && input.played.score.kind === 'mate'
-          ? `, which mates in ${input.played.score.moves}`
-          : `; in the engine's line ${colourName(opp)} wins ${pawns(lost)} of material`;
-      const before = threat && !threat.real ? ' There was no such threat before your move.' : '';
+          ? t('why.whichMates', { n: input.played.score.moves })
+          : t('why.engineLineWins', { side: colourName(opp), what: winsMaterial(lost) });
+      const before = threat && !threat.real ? ` ${t('why.noSuchThreat')}` : '';
       causes.push({
         kind: 'allowed-tactic',
         sizePct: lossPct,
-        text: `${playedSan} allows ${reply}${effect}.${before}`,
+        text: `${t('why.allows', { played: playedSan, reply, effect })}${before}`,
       });
     }
   }
@@ -321,10 +326,8 @@ export function explainBadMove(input: WhyBadInput, policy = WHY_BAD_POLICY): Why
       kind: 'positional',
       sizePct: lossPct,
       text:
-        `${playedSan} does not lose material in the next few moves, but the engine prefers ${bestSan} ` +
-        `(eval ${formatScore(best.score)} instead of ${formatScore(input.played.score)}): ` +
-        `the difference is in the position (king safety, piece activity, structure).` +
-        (refutationSan ? ` After ${playedSan} it expects ${refutationSan}.` : ''),
+        t('why.positional', { played: playedSan, best: bestSan, bestEval: formatScore(best.score), playedEval: formatScore(input.played.score) }) +
+        (refutationSan ? ` ${t('why.expects', { played: playedSan, reply: refutationSan })}` : ''),
     });
   }
 

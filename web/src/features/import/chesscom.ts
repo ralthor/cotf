@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import { parseSingleGame } from '../../core/chess/pgn';
 import type { GameRecord } from '../../core/chess/types';
 import { ImportError, isRecord, ProviderHttpClient, type FetchLike } from './http';
@@ -31,7 +32,7 @@ const USERNAME_RE = /^[A-Za-z0-9_-]{2,50}$/;
 
 export function normaliseChessComUsername(input: string): string {
   const u = input.trim().replace(/^@/, '');
-  if (!USERNAME_RE.test(u)) throw new ImportError('invalid-input', 'Enter a valid Chess.com username.');
+  if (!USERNAME_RE.test(u)) throw new ImportError('invalid-input', t('import.err.chesscomUsername'));
   return u.toLowerCase();
 }
 
@@ -94,7 +95,7 @@ export class ChessComClient {
     try {
       data = JSON.parse(body);
     } catch {
-      throw new ImportError('invalid-data', 'Chess.com returned an unreadable archive index.');
+      throw new ImportError('invalid-data', t('import.err.chesscomIndex'));
     }
     if (!isRecord(data) || !Array.isArray(data.archives)) return [];
     return data.archives.filter(
@@ -103,13 +104,13 @@ export class ChessComClient {
   }
 
   async month(url: string, signal?: AbortSignal): Promise<ChessComGame[]> {
-    if (!url.startsWith(`${CHESSCOM_API}/player/`)) throw new ImportError('invalid-input', 'Unexpected archive URL.');
+    if (!url.startsWith(`${CHESSCOM_API}/player/`)) throw new ImportError('invalid-input', t('import.err.archiveUrl'));
     const body = await this.http.getText(url, 'application/json', signal);
     let data: unknown;
     try {
       data = JSON.parse(body);
     } catch {
-      throw new ImportError('invalid-data', 'Chess.com returned an unreadable month archive.');
+      throw new ImportError('invalid-data', t('import.err.chesscomMonth'));
     }
     if (!isRecord(data) || !Array.isArray(data.games)) return [];
     return data.games.map(sanitiseGame).filter((g): g is ChessComGame => g !== null);
@@ -145,7 +146,7 @@ export class ChessComClient {
 }
 
 export function chessComToGameRecord(g: ChessComGame): GameRecord {
-  if (!g.pgn) throw new ImportError('invalid-data', 'This Chess.com game has no PGN.');
+  if (!g.pgn) throw new ImportError('invalid-data', t('import.err.chesscomNoPgn'));
   return parseSingleGame(g.pgn, {
     source: 'chesscom',
     sourceUrl: g.url,
@@ -153,6 +154,5 @@ export function chessComToGameRecord(g: ChessComGame): GameRecord {
   });
 }
 
-export const CHESSCOM_FRESHNESS_NOTE =
-  'Chess.com refreshes these archives at most every 12 hours, so a game you just finished may not appear yet. ' +
-  'For instant analysis, download the PGN from the game page and paste it here.';
+/** Shown under Chess.com results; a function so it follows the current language. */
+export const chesscomFreshnessNote = (): string => t('import.chesscom.freshness');

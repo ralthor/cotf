@@ -1,3 +1,5 @@
+import { t } from '../../i18n';
+
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export class ImportError extends Error {
@@ -100,26 +102,26 @@ export class ProviderHttpClient {
         if ((e as Error).name === 'AbortError') throw e;
         throw new ImportError(
           'network',
-          `Could not reach ${this.provider}. This may be a network problem or the browser blocked the cross-origin request (CORS). You can still paste or upload a PGN.`,
+          t('import.err.network', { provider: this.provider }),
         );
       }
       if (res.status === 429) {
         if (attempt >= maxRetries) {
-          throw new ImportError('rate-limited', `${this.provider} is rate-limiting requests. Try again in a minute.`, 429);
+          throw new ImportError('rate-limited', t('import.err.rateLimited', { provider: this.provider }), 429);
         }
         await this.sleep(this.opts.rateLimitBackoffMs * (attempt + 1));
         continue;
       }
       if (res.status === 304) return res;
       if (res.status === 404 || res.status === 410) {
-        throw new ImportError('not-found', `${this.provider}: not found (${res.status}).`, res.status);
+        throw new ImportError('not-found', t('import.err.notFound', { provider: this.provider, status: res.status }), res.status);
       }
       if (!res.ok) {
         if (res.status >= 500 && attempt < maxRetries) {
           await this.sleep(1000 * 2 ** attempt);
           continue;
         }
-        throw new ImportError('http', `${this.provider} responded with HTTP ${res.status}.`, res.status);
+        throw new ImportError('http', t('import.err.http', { provider: this.provider, status: res.status }), res.status);
       }
       return res;
     }

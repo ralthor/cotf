@@ -1,4 +1,5 @@
 import type { GameRecord } from '../core/chess/types';
+import { t } from '../i18n';
 import { LichessClient, lichessToGameRecord, parseLichessGameId } from '../features/import/lichess';
 
 /**
@@ -50,8 +51,8 @@ export function clearDeepLink(): void {
 
 /** Why a link value was refused, in words for the notice. */
 export function invalidDeepLinkReason(value: string): string {
-  if (/lichess\.org\/study\//i.test(value)) return 'Lichess studies are not supported. Link to a finished game instead.';
-  return 'That does not look like a Lichess game URL or ID.';
+  if (/lichess\.org\/study\//i.test(value)) return t('link.study');
+  return t('link.notGame');
 }
 
 export const lichessGameRecordId = (gameId: string): string => `url:https://lichess.org/${gameId}`;

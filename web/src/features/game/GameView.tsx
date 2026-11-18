@@ -20,6 +20,8 @@ import { annotatedPgn, analysisJson, downloadText, safeFilename } from '../analy
 import { PRESETS, type GameAnalysis, type PresetId } from '../analysis/types';
 import { useGameAnalysis } from '../analysis/useGameAnalysis';
 import { useMoveExplainer, whyBadKey } from '../explain/useMoveExplainer';
+import { tOr } from '../../i18n';
+import { useT } from '../../i18n/react';
 
 type PvPreview = { baseFen: string; moves: string[]; index: number };
 
@@ -50,6 +52,7 @@ const ARROW = {
 };
 
 export function GameView({ game, renderExtra }: GameViewProps) {
+  const { t } = useT();
   const positions = useMemo(() => positionsOf(game), [game]);
   // The parent keys this component by game id, so state resets when the game changes.
   const [pos, setPos] = useState(0);
@@ -179,7 +182,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
         <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
         {game.sourceUrl && (
           <a href={game.sourceUrl} target="_blank" rel="noreferrer noopener" className="small">
-            Open source game ↗
+            {t('game.openSource')} ↗
           </a>
         )}
       </div>
@@ -190,7 +193,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
         </div>
         <div className="board-col">
           <EvalStrip score={pv ? undefined : analysis?.positionEvals[showBefore ? pos - 1 : pos]} />
-          <div ref={boardRef} className="board-wrap" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          <div ref={boardRef} className="board-wrap" dir="ltr" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
             <Chessboard
               options={{
                 id: 'review-board',
@@ -210,20 +213,20 @@ export function GameView({ game, renderExtra }: GameViewProps) {
               </div>
             )}
           </div>
-          <div className="controls" role="group" aria-label="Navigation">
-            <button type="button" onClick={() => go(0)} aria-label="First position" disabled={pos === 0 && !pv}>⏮</button>
-            <button type="button" onClick={() => step(-1)} aria-label="Previous move" disabled={pos === 0 && !pv}>◀</button>
-            <button type="button" onClick={() => step(1)} aria-label="Next move" disabled={pos === positions.length - 1 && !pv}>▶</button>
-            <button type="button" onClick={() => go(positions.length - 1)} aria-label="Last position">⏭</button>
-            <button type="button" onClick={() => setOrientation((o) => (o === 'white' ? 'black' : 'white'))} aria-label="Flip board">
-              ⇅<span className="hide-mobile"> Flip</span>
+          <div className="controls" role="group" aria-label={t('game.nav')} dir="ltr">
+            <button type="button" onClick={() => go(0)} aria-label={t('game.first')} disabled={pos === 0 && !pv}>⏮</button>
+            <button type="button" onClick={() => step(-1)} aria-label={t('game.prev')} disabled={pos === 0 && !pv}>◀</button>
+            <button type="button" onClick={() => step(1)} aria-label={t('game.next')} disabled={pos === positions.length - 1 && !pv}>▶</button>
+            <button type="button" onClick={() => go(positions.length - 1)} aria-label={t('game.last')}>⏭</button>
+            <button type="button" onClick={() => setOrientation((o) => (o === 'white' ? 'black' : 'white'))} aria-label={t('game.flip')}>
+              ⇅<span className="hide-mobile"> {t('game.flipShort')}</span>
             </button>
             <a
               className="button-link"
               href={lichessAnalysisUrl(fen, orientation)}
               target="_blank"
               rel="noreferrer noopener"
-              title="Open this position on the Lichess analysis board"
+              title={t('game.lichessBoard')}
             >
               Lichess ↗
             </a>
@@ -231,12 +234,13 @@ export function GameView({ game, renderExtra }: GameViewProps) {
           {pv && (
             <div className="notice row" style={{ marginTop: 8, justifyContent: 'space-between' }}>
               <span>
-                Previewing engine line: {uciLineToSan(pv.baseFen, pv.moves).slice(0, pv.index).join(' ') || '(start)'}
+                {t('game.previewLine')}{' '}
+                <span dir="ltr">{uciLineToSan(pv.baseFen, pv.moves).slice(0, pv.index).join(' ') || t('game.lineStart')}</span>
               </span>
               <span className="row">
                 <button type="button" onClick={() => setPv({ ...pv, index: Math.max(0, pv.index - 1) })}>◀</button>
                 <button type="button" onClick={() => setPv({ ...pv, index: Math.min(pv.moves.length, pv.index + 1) })}>▶</button>
-                <button type="button" onClick={() => setPv(null)}>Back to game</button>
+                <button type="button" onClick={() => setPv(null)}>{t('game.backToGame')}</button>
               </span>
             </div>
           )}
@@ -284,22 +288,22 @@ export function GameView({ game, renderExtra }: GameViewProps) {
         </div>
 
         <div className="side stack">
-          <section className="panel analysis-controls" aria-label="Analysis controls">
+          <section className="panel analysis-controls" aria-label={t('game.controls')}>
             <div className="row">
               <label className="small row">
-                Depth
+                {t('game.depth')}
                 <select value={engine.presetId} onChange={(e) => engine.setPresetId(e.target.value as PresetId)} disabled={running}>
-                  {Object.values(PRESETS).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  {Object.values(PRESETS).map((p) => <option key={p.id} value={p.id}>{tOr(`preset.${p.id}`, p.label)}</option>)}
                 </select>
               </label>
               <label className="small row">
-                Engine
+                {t('game.engine')}
                 <select value={engine.flavour} onChange={(e) => engine.setFlavour(e.target.value as EngineFlavour)} disabled={running}>
                   {AVAILABLE_FLAVOURS.map((k) => <option key={k} value={k}>{ENGINE_BUILDS[k].label} · {ENGINE_BUILDS[k].approxSize}</option>)}
                 </select>
               </label>
-              <label className="small row" title="Single-threaded engines analysing different positions at the same time.">
-                Parallel engines
+              <label className="small row" title={t('game.parallel.title')}>
+                {t('game.parallel')}
                 <select value={engine.engineCount} onChange={(e) => engine.setEngineCount(Number(e.target.value))} disabled={running}>
                   {Array.from({ length: engine.maxEngineCount }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
@@ -308,13 +312,13 @@ export function GameView({ game, renderExtra }: GameViewProps) {
             <div className="row" style={{ marginTop: 8 }}>
               {!running ? (
                 <button type="button" className="primary" onClick={() => void start()}>
-                  {analysis ? 'Re-analyse' : 'Analyse game'}
+                  {analysis ? t('game.reanalyse') : t('game.analyse')}
                 </button>
               ) : (
-                <button type="button" className="danger" onClick={cancel}>Cancel</button>
+                <button type="button" className="danger" onClick={cancel}>{t('common.cancel')}</button>
               )}
-              {engine.status === 'loading' && <span className="small muted">Loading Stockfish…</span>}
-              {engine.status === 'error' && <span className="small error">Engine failed to load: {engine.error}</span>}
+              {engine.status === 'loading' && <span className="small muted">{t('game.loadingEngine')}</span>}
+              {engine.status === 'error' && <span className="small error">{t('game.engineFailed', { error: engine.error ?? '' })}</span>}
             </div>
             {analysis && analysis.phase !== 'done' && (
               <div style={{ marginTop: 8 }} aria-live="polite">
@@ -323,26 +327,26 @@ export function GameView({ game, renderExtra }: GameViewProps) {
                 </div>
                 <p className="small muted">
                   {analysis.phase === 'cancelled'
-                    ? 'Cancelled — results so far are provisional. Re-run to resume (finished positions are cached).'
+                    ? t('game.cancelled')
                     : analysis.phase === 'error'
-                      ? <span className="error">Analysis failed: {analysis.error}</span>
-                      : `${analysis.phase.replace('-', ' ')} · ${analysis.progress.label}`}
+                      ? <span className="error">{t('game.failed', { error: analysis.error ?? '' })}</span>
+                      : `${tOr(`phase.analysis.${analysis.phase}`, analysis.phase.replace('-', ' '))} · ${analysis.progress.label}`}
                 </p>
               </div>
             )}
             {renderExtra?.({ game, analysis, setAnalysis })}
           </section>
 
-          <section className="panel" aria-label="Moves">
+          <section className="panel" aria-label={t('moves.list')}>
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-              <h2 style={{ margin: 0 }}>Moves</h2>
+              <h2 style={{ margin: 0 }}>{t('moves.list')}</h2>
               <label className="small row">
-                Show
+                {t('moves.show')}
                 <select value={filter} onChange={(e) => setFilter(e.target.value as MoveFilter)}>
-                  <option value="all">All</option>
-                  <option value="errors">Inaccuracies+</option>
-                  <option value="blunders">Blunders</option>
-                  <option value="brilliant">Brilliant / great</option>
+                  <option value="all">{t('moves.filter.all')}</option>
+                  <option value="errors">{t('moves.filter.errors')}</option>
+                  <option value="blunders">{t('moves.filter.blunders')}</option>
+                  <option value="brilliant">{t('moves.filter.brilliant')}</option>
                 </select>
               </label>
             </div>
@@ -350,18 +354,18 @@ export function GameView({ game, renderExtra }: GameViewProps) {
           </section>
 
           {analysis?.summary && (
-            <section className="panel" aria-label="Summary">
-              <h2>Summary</h2>
+            <section className="panel" aria-label={t('summary.title')}>
+              <h2>{t('summary.title')}</h2>
               <Summary game={game} analysis={analysis} />
               <div className="row">
                 <button type="button" onClick={() => downloadText(`${safeFilename(title)}.annotated.pgn`, annotatedPgn(game, analysis), 'application/x-chess-pgn')}>
-                  Export PGN
+                  {t('summary.exportPgn')}
                 </button>
                 <button type="button" onClick={() => downloadText(`${safeFilename(title)}.analysis.json`, analysisJson(game, analysis), 'application/json')}>
-                  Export JSON
+                  {t('summary.exportJson')}
                 </button>
                 <button type="button" onClick={() => downloadText(`${safeFilename(title)}.pgn`, game.rawPgn, 'application/x-chess-pgn')}>
-                  Original PGN
+                  {t('summary.originalPgn')}
                 </button>
               </div>
             </section>
@@ -370,12 +374,12 @@ export function GameView({ game, renderExtra }: GameViewProps) {
       </div>
 
       {explainMove && (explainMove.brilliance?.verdict ?? 'none') !== 'none' ? (
-        <EvidenceModal title={`${explainMove.san}: brilliancy evidence`} onClose={() => setExplainPly(null)}>
+        <EvidenceModal title={t('evidence.brilliantTitle', { san: explainMove.san })} onClose={() => setExplainPly(null)}>
           <BrillianceDetails evidence={explainMove.brilliance!} />
         </EvidenceModal>
       ) : (
         explainMove?.great && (
-          <EvidenceModal title={`${explainMove.san}: great-move evidence`} onClose={() => setExplainPly(null)}>
+          <EvidenceModal title={t('evidence.greatTitle', { san: explainMove.san })} onClose={() => setExplainPly(null)}>
             <GreatDetails evidence={explainMove.great} />
           </EvidenceModal>
         )

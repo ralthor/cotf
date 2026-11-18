@@ -27,6 +27,15 @@ The 95 MB full engine is always offered and only downloaded when chosen. "Parall
 
 The app remembers your Chess.com and Lichess usernames, imported games and analyses in this browser (localStorage and IndexedDB). Each device keeps its own copy. On any board, **Lichess ↗** opens the current position on the Lichess analysis board. On phones you can swipe across the board to step through moves.
 
+## Languages
+
+English and Persian (right-to-left). Pick one in the header menu; the choice is kept in
+this browser, otherwise the browser's language is used. Texts are keys; each language is
+one flat JSON file in `web/src/i18n/locales/` (`"key": "text"`). A missing key falls back
+to English. To add a language, copy `en.json` to `<code>.json` and translate the values,
+keeping the `{placeholders}`. `src/i18n/i18n.test.ts` checks that every file has the same
+keys. Exported PGN/JSON and the brilliancy gate details stay in English.
+
 ## Publish on GitHub Pages
 
 `.github/workflows/deploy-pages.yml` builds `web/` and deploys it on every push to `main` that touches `web/`.

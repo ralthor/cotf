@@ -3,6 +3,8 @@ import { parseSingleGame } from '../../core/chess/pgn';
 import type { GameRecord } from '../../core/chess/types';
 import { api, ApiError, query, type ExternalAccount, type GameFilters, type Paginated, type ServerGame, type ServerGameDetail } from './api';
 import { useAuth } from './AuthContext';
+import { getLocale, t as translate, tOr } from '../../i18n';
+import { useT } from '../../i18n/react';
 
 export function serverGameToRecord(g: ServerGameDetail): GameRecord {
   const provider = g.provider === 'pgn' ? 'pgn-paste' : g.provider;
@@ -20,6 +22,7 @@ export function serverGameToRecord(g: ServerGameDetail): GameRecord {
 
 export function LoginForm() {
   const { login, register } = useAuth();
+  const { t } = useT();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -43,16 +46,16 @@ export function LoginForm() {
         }
       }}
     >
-      <h2>{mode === 'login' ? 'Sign in' : 'Create an account'}</h2>
+      <h2>{mode === 'login' ? t('auth.signIn') : t('auth.create')}</h2>
       <p className="small muted">
-        Accounts are local to this app. You never give us a Chess.com or Lichess password — only your public username.
+        {t('auth.note')}
       </p>
       <label className="stack small">
-        Username
+        {t('auth.username')}
         <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
       </label>
       <label className="stack small">
-        Password
+        {t('auth.password')}
         <input
           type="password"
           value={password}
@@ -64,9 +67,9 @@ export function LoginForm() {
       </label>
       {error && <p className="error small" role="alert">{error}</p>}
       <div className="row">
-        <button type="submit" className="primary" disabled={busy}>{mode === 'login' ? 'Sign in' : 'Register'}</button>
+        <button type="submit" className="primary" disabled={busy}>{mode === 'login' ? t('auth.signIn') : t('auth.register')}</button>
         <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-          {mode === 'login' ? 'Create an account' : 'I already have an account'}
+          {mode === 'login' ? t('auth.create') : t('auth.haveAccount')}
         </button>
       </div>
     </form>
@@ -75,6 +78,7 @@ export function LoginForm() {
 
 function LinkedAccounts() {
   const { me, refresh } = useAuth();
+  const { t } = useT();
   const [provider, setProvider] = useState<'chesscom' | 'lichess'>('chesscom');
   const [username, setUsername] = useState('');
   const [msg, setMsg] = useState('');
@@ -93,7 +97,7 @@ function LinkedAccounts() {
     setMsg('');
     try {
       await api(`accounts/external/${a.id}/sync/`, { method: 'POST' });
-      setMsg(`Sync queued for ${a.username}. New games appear when the background job finishes.`);
+      setMsg(t('library.syncQueued', { username: a.username }));
       setTimeout(() => void refresh(), 4000);
     } catch (e) {
       setMsg((e as Error).message);
@@ -106,17 +110,17 @@ function LinkedAccounts() {
 
   return (
     <section className="panel stack">
-      <h2>Linked usernames</h2>
+      <h2>{t('library.linked')}</h2>
       <ul className="small">
         {me?.external_accounts.map((a) => (
           <li key={a.id} className="row">
             <strong>{a.provider === 'chesscom' ? 'Chess.com' : 'Lichess'}</strong> {a.username}
             <span className="muted">
-              {a.last_synced_at ? `synced ${new Date(a.last_synced_at).toLocaleString()}` : 'never synced'} · {a.last_sync_status}
+              {a.last_synced_at ? t('library.synced', { when: new Date(a.last_synced_at).toLocaleString(getLocale()) }) : t('library.neverSynced')} · {a.last_sync_status}
             </span>
             {a.last_sync_error && <span className="error">{a.last_sync_error}</span>}
-            <button type="button" onClick={() => void sync(a)}>Sync now</button>
-            <button type="button" className="link" onClick={() => void unlink(a)}>Unlink</button>
+            <button type="button" onClick={() => void sync(a)}>{t('library.syncNow')}</button>
+            <button type="button" className="link" onClick={() => void unlink(a)}>{t('library.unlink')}</button>
           </li>
         ))}
       </ul>
@@ -127,14 +131,14 @@ function LinkedAccounts() {
           void link();
         }}
       >
-        <select value={provider} onChange={(e) => setProvider(e.target.value as 'chesscom' | 'lichess')} aria-label="Provider">
+        <select value={provider} onChange={(e) => setProvider(e.target.value as 'chesscom' | 'lichess')} aria-label={t('library.provider')}>
           <option value="chesscom">Chess.com</option>
           <option value="lichess">Lichess</option>
         </select>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="public username" aria-label="Username" />
-        <button type="submit" disabled={!username.trim()}>Link</button>
+        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t('library.publicUsername')} aria-label={t('auth.username')} />
+        <button type="submit" disabled={!username.trim()}>{t('library.link')}</button>
       </form>
-      <p className="small muted">Linked accounts sync automatically every few hours. Chess.com archives can lag up to ~12 hours.</p>
+      <p className="small muted">{t('library.syncNote')}</p>
       {msg && <p className="small" aria-live="polite">{msg}</p>}
     </section>
   );
@@ -142,6 +146,7 @@ function LinkedAccounts() {
 
 export function LibraryView({ onOpenGame }: { onOpenGame: (games: GameRecord[]) => void }) {
   const { me, loading, logout } = useAuth();
+  const { t } = useT();
   const [filters, setFilters] = useState<GameFilters>({});
   const [page, setPage] = useState(1);
   const [data, setData] = useState<Paginated<ServerGame> | null>(null);
@@ -156,14 +161,14 @@ export function LibraryView({ onOpenGame }: { onOpenGame: (games: GameRecord[]) 
         setData(d);
         setError('');
       },
-      (e) => live && setError(e instanceof ApiError ? e.message : 'Failed to load games.'),
+      (e) => live && setError(e instanceof ApiError ? e.message : translate('library.loadFailed')),
     );
     return () => {
       live = false;
     };
   }, [me, filters, page]);
 
-  if (loading) return <p className="muted">Loading…</p>;
+  if (loading) return <p className="muted">{t('common.loading')}</p>;
   if (!me) return <LoginForm />;
 
   const open = async (id: number) => {
@@ -184,36 +189,36 @@ export function LibraryView({ onOpenGame }: { onOpenGame: (games: GameRecord[]) 
   return (
     <div className="stack">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Library — {me.username}</h2>
-        <button type="button" onClick={() => void logout()}>Sign out</button>
+        <h2 style={{ margin: 0 }}>{t('library.title', { username: me.username })}</h2>
+        <button type="button" onClick={() => void logout()}>{t('auth.signOut')}</button>
       </div>
       <LinkedAccounts />
       <section className="panel stack">
         <div className="row small">
-          <select value={filters.colour ?? ''} onChange={set('colour')} aria-label="Colour">
-            <option value="">Any colour</option>
-            <option value="w">As White</option>
-            <option value="b">As Black</option>
+          <select value={filters.colour ?? ''} onChange={set('colour')} aria-label={t('stats.colour')}>
+            <option value="">{t('library.anyColour')}</option>
+            <option value="w">{t('stats.asWhite')}</option>
+            <option value="b">{t('stats.asBlack')}</option>
           </select>
-          <select value={filters.time_class ?? ''} onChange={set('time_class')} aria-label="Time control">
-            <option value="">Any time control</option>
-            {['bullet', 'blitz', 'rapid', 'classical', 'daily'].map((t) => <option key={t} value={t}>{t}</option>)}
+          <select value={filters.time_class ?? ''} onChange={set('time_class')} aria-label={t('stats.timeControl')}>
+            <option value="">{t('library.anyTimeControl')}</option>
+            {['bullet', 'blitz', 'rapid', 'classical', 'daily'].map((k) => <option key={k} value={k}>{t(`timeClass.${k}`)}</option>)}
           </select>
-          <select value={filters.result ?? ''} onChange={set('result')} aria-label="Result">
-            <option value="">Any result</option>
-            <option value="win">Wins</option>
-            <option value="loss">Losses</option>
-            <option value="draw">Draws</option>
+          <select value={filters.result ?? ''} onChange={set('result')} aria-label={t('library.result')}>
+            <option value="">{t('library.anyResult')}</option>
+            <option value="win">{t('library.wins')}</option>
+            <option value="loss">{t('library.losses')}</option>
+            <option value="draw">{t('library.draws')}</option>
           </select>
-          <select value={filters.provider ?? ''} onChange={set('provider')} aria-label="Source">
-            <option value="">Any source</option>
+          <select value={filters.provider ?? ''} onChange={set('provider')} aria-label={t('library.source')}>
+            <option value="">{t('library.anySource')}</option>
             <option value="chesscom">Chess.com</option>
             <option value="lichess">Lichess</option>
             <option value="pgn">PGN</option>
           </select>
-          <input placeholder="Opponent" value={filters.opponent ?? ''} onChange={set('opponent')} aria-label="Opponent" />
-          <label className="row">From <input type="date" onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? `${e.target.value}T00:00:00Z` : '' }))} /></label>
-          <label className="row">To <input type="date" onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value ? `${e.target.value}T23:59:59Z` : '' }))} /></label>
+          <input placeholder={t('library.opponent')} value={filters.opponent ?? ''} onChange={set('opponent')} aria-label={t('library.opponent')} />
+          <label className="row">{t('library.from')} <input type="date" onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? `${e.target.value}T00:00:00Z` : '' }))} /></label>
+          <label className="row">{t('library.to')} <input type="date" onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value ? `${e.target.value}T23:59:59Z` : '' }))} /></label>
         </div>
         {error && <p className="error small" role="alert">{error}</p>}
         {data && (
@@ -222,7 +227,7 @@ export function LibraryView({ onOpenGame }: { onOpenGame: (games: GameRecord[]) 
               <table className="data">
                 <thead>
                   <tr>
-                    <th>Date</th><th>Opponent</th><th>Colour</th><th>Result</th><th>Type</th><th>Opening</th><th>Our accuracy</th><th />
+                    <th>{t('library.date')}</th><th>{t('library.opponent')}</th><th>{t('stats.colour')}</th><th>{t('library.result')}</th><th>{t('stats.type')}</th><th>{t('stats.opening')}</th><th>{t('library.ourAccuracy')}</th><th />
                   </tr>
                 </thead>
                 <tbody>
@@ -230,14 +235,14 @@ export function LibraryView({ onOpenGame }: { onOpenGame: (games: GameRecord[]) 
                     const acc = g.user_colour === 'w' ? g.latest_accuracy?.white?.value : g.user_colour === 'b' ? g.latest_accuracy?.black?.value : undefined;
                     return (
                       <tr key={g.id}>
-                        <td>{g.played_at ? new Date(g.played_at).toLocaleDateString() : '—'}</td>
-                        <td>{g.opponent || `${g.white} vs ${g.black}`} {g.opponent_rating ? `(${g.opponent_rating})` : ''}</td>
-                        <td>{g.user_colour === 'w' ? 'White' : g.user_colour === 'b' ? 'Black' : '—'}</td>
-                        <td>{g.user_result || g.result}</td>
-                        <td>{g.time_class || '—'}</td>
+                        <td>{g.played_at ? new Date(g.played_at).toLocaleDateString(getLocale()) : '—'}</td>
+                        <td>{g.opponent || t('import.players', { white: g.white, black: g.black })} {g.opponent_rating ? `(${g.opponent_rating})` : ''}</td>
+                        <td>{g.user_colour === 'w' ? t('colour.white') : g.user_colour === 'b' ? t('colour.black') : '—'}</td>
+                        <td>{g.user_result ? tOr(`result.${g.user_result}`, g.user_result) : g.result}</td>
+                        <td>{g.time_class ? tOr(`timeClass.${g.time_class}`, g.time_class) : '—'}</td>
                         <td>{g.opening || g.eco || '—'}</td>
                         <td>{acc !== undefined ? acc.toFixed(1) : '—'}</td>
-                        <td><button type="button" onClick={() => void open(g.id)}>Open</button></td>
+                        <td><button type="button" onClick={() => void open(g.id)}>{t('library.open')}</button></td>
                       </tr>
                     );
                   })}
@@ -245,9 +250,9 @@ export function LibraryView({ onOpenGame }: { onOpenGame: (games: GameRecord[]) 
               </table>
             </div>
             <div className="row small">
-              <button type="button" disabled={!data.previous} onClick={() => setPage((p) => p - 1)}>Previous</button>
-              <span>Page {page} · {data.count} games</span>
-              <button type="button" disabled={!data.next} onClick={() => setPage((p) => p + 1)}>Next</button>
+              <button type="button" disabled={!data.previous} onClick={() => setPage((p) => p - 1)}>{t('library.previous')}</button>
+              <span>{t('library.page', { page, count: data.count })}</span>
+              <button type="button" disabled={!data.next} onClick={() => setPage((p) => p + 1)}>{t('library.next')}</button>
             </div>
           </>
         )}

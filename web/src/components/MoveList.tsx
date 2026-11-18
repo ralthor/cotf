@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import type { MoveRecord } from '../core/chess/types';
 import type { MoveAnalysis } from '../features/analysis/types';
 import { CategoryBadge } from './CategoryBadge';
+import { categoryLabel } from './categoryText';
+import { useT } from '../i18n/react';
 
 export type MoveFilter = 'all' | 'errors' | 'blunders' | 'brilliant';
 
@@ -26,6 +28,7 @@ export function MoveList({
   onSelect: (positionIndex: number) => void;
   filter: MoveFilter;
 }) {
+  const { t } = useT();
   const ref = useRef<HTMLDivElement>(null);
   // Keep the current move visible inside the list box only. scrollIntoView() would also scroll the
   // page and pull the board out of view, so adjust the list's own scrollTop instead.
@@ -57,7 +60,7 @@ export function MoveList({
         aria-current={current === i + 1 ? 'true' : undefined}
         className={matches(a, filter) ? '' : 'dim'}
         onClick={() => onSelect(i + 1)}
-        aria-label={`${m.fullMoveNumber}${m.colour === 'w' ? '.' : '...'} ${m.san}${a?.category ? `, ${a.category}` : ''}`}
+        aria-label={`${m.fullMoveNumber}${m.colour === 'w' ? '.' : '...'} ${m.san}${a?.category ? `, ${categoryLabel(a.category)}` : ''}`}
       >
         <span>{m.san}</span>
         <CategoryBadge category={a?.category} candidate={a?.brilliance?.verdict === 'candidate'} />
@@ -66,7 +69,7 @@ export function MoveList({
   };
 
   return (
-    <div className="move-list" ref={ref} role="list" aria-label="Moves">
+    <div className="move-list" ref={ref} role="list" aria-label={t('moves.list')}>
       {rows.map((r) => (
         <div key={r.num} style={{ display: 'contents' }} role="listitem">
           <span className="num">{r.num}.</span>

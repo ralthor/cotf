@@ -3,6 +3,8 @@ import type { GameRecord } from '../../core/chess/types';
 import type { GameAnalysis } from '../analysis/types';
 import { api, type CloudJob } from '../library/api';
 import { useAuth } from '../library/AuthContext';
+import { t, tOr } from '../../i18n';
+import { useT } from '../../i18n/react';
 
 type Props = { game: GameRecord; analysis: GameAnalysis | null; setAnalysis: (a: GameAnalysis) => void };
 type Profiles = { enabled: boolean; profiles: { id: string; label: string }[]; remaining_positions_today: number };
@@ -13,7 +15,7 @@ async function ensureServerGame(game: GameRecord): Promise<number> {
   if (known) return known;
   const r = await api<{ created: number[]; existing: number[] }>('imports/pgn/', { method: 'POST', body: { pgn: game.rawPgn } });
   const id = r.created[0] ?? r.existing[0];
-  if (!id) throw new Error('The server could not import this game.');
+  if (!id) throw new Error(t('cloud.importFailed'));
   (game as GameRecord & { serverId?: number }).serverId = id;
   return id;
 }
@@ -21,6 +23,7 @@ async function ensureServerGame(game: GameRecord): Promise<number> {
 /** Phase 2/3 actions shown under the analysis controls: save browser analysis, run deep cloud analysis. */
 export function CloudAnalysisPanel({ game, analysis, setAnalysis }: Props) {
   const { me } = useAuth();
+  useT();
   const [profiles, setProfiles] = useState<Profiles | null>(null);
   const [profile, setProfile] = useState('cloud-standard');
   const [job, setJob] = useState<CloudJob | null>(null);
@@ -35,7 +38,7 @@ export function CloudAnalysisPanel({ game, analysis, setAnalysis }: Props) {
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   if (!me) {
-    return <p className="small muted" style={{ marginTop: 8 }}>Sign in on the Library tab to save analyses or request deeper cloud analysis.</p>;
+    return <p className="small muted" style={{ marginTop: 8 }}>{t('cloud.signIn')}</p>;
   }
 
   const poll = (id: number) => {
@@ -45,7 +48,7 @@ export function CloudAnalysisPanel({ game, analysis, setAnalysis }: Props) {
         setJob(j);
         if (j.status === 'done' && j.analysis) {
           setAnalysis({ ...j.analysis, gameId: game.id });
-          setMsg('Cloud analysis loaded.');
+          setMsg(t('cloud.loaded'));
         } else if (j.status === 'queued' || j.status === 'running') poll(id);
       } catch (e) {
         setMsg((e as Error).message);
@@ -71,7 +74,7 @@ export function CloudAnalysisPanel({ game, analysis, setAnalysis }: Props) {
     try {
       const id = await ensureServerGame(game);
       await api(`games/${id}/analysis/`, { method: 'POST', body: analysis });
-      setMsg('Analysis saved to your library.');
+      setMsg(t('cloud.saved'));
     } catch (e) {
       setMsg((e as Error).message);
     }
@@ -88,29 +91,29 @@ export function CloudAnalysisPanel({ game, analysis, setAnalysis }: Props) {
     <div className="stack" style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
       <div className="row small">
         <button type="button" disabled={!analysis || analysis.phase !== 'done' || analysis.presetId === 'cloud'} onClick={() => void save()}>
-          Save to library
+          {t('cloud.save')}
         </button>
         {profiles?.enabled && (
           <>
-            <select value={profile} onChange={(e) => setProfile(e.target.value)} aria-label="Cloud profile" disabled={!!active}>
+            <select value={profile} onChange={(e) => setProfile(e.target.value)} aria-label={t('cloud.profile')} disabled={!!active}>
               {profiles.profiles.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
             {active ? (
-              <button type="button" className="danger" onClick={() => void cancel()}>Cancel cloud job</button>
+              <button type="button" className="danger" onClick={() => void cancel()}>{t('cloud.cancel')}</button>
             ) : (
-              <button type="button" onClick={() => void requestCloud()}>Deep cloud analysis</button>
+              <button type="button" onClick={() => void requestCloud()}>{t('cloud.deep')}</button>
             )}
           </>
         )}
       </div>
       {profiles?.enabled && (
         <p className="small muted">
-          Native Stockfish on a server; deeper and slower than your browser. Remaining today: {profiles.remaining_positions_today} positions.
+          {t('cloud.note', { n: profiles.remaining_positions_today })}
         </p>
       )}
       {job && (
         <p className="small" aria-live="polite">
-          Cloud job #{job.id}: {job.status}
+          {t('cloud.job', { id: job.id, status: tOr(`cloud.status.${job.status}`, job.status) })}
           {job.progress_label ? ` · ${job.progress_label}` : ''}
           {job.error ? <span className="error"> · {job.error}</span> : null}
         </p>

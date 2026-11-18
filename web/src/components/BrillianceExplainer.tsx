@@ -1,31 +1,38 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { ordinal, type BrillianceEvidence } from '../core/brilliancy/detector';
 import type { GreatEvidence } from '../core/brilliancy/great';
+import { t } from '../i18n';
+import { useT } from '../i18n/react';
 
 const n1 = (v: number | null) => (v === null ? '—' : v.toFixed(1));
 
 export function BrillianceDetails({ evidence }: { evidence: BrillianceEvidence }) {
+  useT();
   const s = evidence.signals;
   const verdict =
-    evidence.verdict === 'brilliant' ? 'Brilliant' : evidence.verdict === 'candidate' ? 'Brilliant candidate (unconfirmed)' : 'Not brilliant';
+    evidence.verdict === 'brilliant'
+      ? t('category.brilliant')
+      : evidence.verdict === 'candidate'
+        ? t('evidence.candidate')
+        : t('evidence.notBrilliant');
   return (
     <div className="stack">
       <p>
-        <strong>{verdict}</strong> · score {evidence.score}/100 · confidence {evidence.confidence} · {evidence.version}
+        <strong>{verdict}</strong> · {t('evidence.score', { score: evidence.score })} · {t('evidence.confidence', { confidence: evidence.confidence })} · {evidence.version}
       </p>
 
       <h3>
-        What a {s.horizon}-ply look sees <span className="muted small">(mover's expected score)</span>
+        {t('evidence.shallowSees', { n: s.horizon })} <span className="muted small">{t('evidence.moverScore')}</span>
       </h3>
       <div style={{ overflowX: 'auto' }}>
         <table className="data">
           <thead>
             <tr>
-              <th>Depth</th>
-              <th>Played move</th>
-              <th>Rank</th>
-              <th>Best there</th>
-              <th>Looks worse by</th>
+              <th>{t('game.depth')}</th>
+              <th>{t('evidence.playedMove')}</th>
+              <th>{t('evidence.rank')}</th>
+              <th>{t('evidence.bestThere')}</th>
+              <th>{t('evidence.looksWorse')}</th>
             </tr>
           </thead>
           <tbody>
@@ -33,40 +40,40 @@ export function BrillianceDetails({ evidence }: { evidence: BrillianceEvidence }
               <tr key={r.depth}>
                 <td>{r.depth}</td>
                 <td>{r.playedPct === null ? '—' : `${r.playedPct.toFixed(1)}%`}</td>
-                <td>{r.playedRank ? `${ordinal(r.playedRank)} of ${r.legalMoves}` : '—'}</td>
+                <td>{r.playedRank ? t('evidence.rankOf', { rank: ordinal(r.playedRank), total: r.legalMoves }) : '—'}</td>
                 <td>
                   {r.bestUci} {r.bestPct.toFixed(1)}%
                 </td>
-                <td>{r.lossPct === null ? '—' : `${r.lossPct.toFixed(1)} pts`}</td>
+                <td>{r.lossPct === null ? '—' : t('evidence.pts', { v: r.lossPct.toFixed(1) })}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <h3>At full depth</h3>
+      <h3>{t('evidence.fullDepth')}</h3>
       <table className="data">
         <tbody>
-          <tr><th>Rank</th><td>{s.deepRank ? 'best (or tied)' : 'not best'}</td></tr>
-          <tr><th>Expected score (mover)</th><td>{n1(s.deepExpectedPct)}%</td></tr>
-          <tr><th>Gain vs. the shallow view of the same move</th><td>{n1(s.inversionPct)} pts</td></tr>
-          <tr><th>Lead over the second-best move</th><td>{n1(s.uniquenessGapPct)} pts</td></tr>
+          <tr><th>{t('evidence.rank')}</th><td>{s.deepRank ? t('evidence.bestOrTied') : t('evidence.notBest')}</td></tr>
+          <tr><th>{t('evidence.expected')}</th><td>{n1(s.deepExpectedPct)}%</td></tr>
+          <tr><th>{t('evidence.gain')}</th><td>{t('evidence.pts', { v: n1(s.inversionPct) })}</td></tr>
+          <tr><th>{t('evidence.leadSecond')}</th><td>{t('evidence.pts', { v: n1(s.uniquenessGapPct) })}</td></tr>
           <tr>
-            <th>Engine finds it</th>
+            <th>{t('evidence.engineFinds')}</th>
             <td>
               {s.discoveryInterval
-                ? `between depth ${s.discoveryInterval[0]} and ${s.discoveryInterval[1]}`
+                ? t('evidence.between', { a: s.discoveryInterval[0], b: s.discoveryInterval[1] })
                 : s.discoveryDepth !== null
-                  ? `from depth ${s.discoveryDepth}`
+                  ? t('evidence.fromDepth', { d: s.discoveryDepth })
                   : '—'}
             </td>
           </tr>
-          <tr><th>Material sacrifice</th><td>{s.sacrifice ? (s.sacrificeSize ? `yes, ${s.sacrificeSize} pawn(s)` : 'yes') : 'no'}</td></tr>
-          <tr><th>Stable on deeper recheck</th><td>{s.stable === null ? 'not checked' : s.stable ? 'yes' : 'no'}</td></tr>
+          <tr><th>{t('evidence.sacrifice')}</th><td>{s.sacrifice ? (s.sacrificeSize ? t('evidence.sacrificeSize', { n: s.sacrificeSize }) : t('common.yes')) : t('common.no')}</td></tr>
+          <tr><th>{t('evidence.stable')}</th><td>{s.stable === null ? t('evidence.notChecked') : s.stable ? t('common.yes') : t('common.no')}</td></tr>
         </tbody>
       </table>
 
-      <h3>Checks</h3>
+      <h3>{t('evidence.checks')}</h3>
       <ul className="small">
         {evidence.gates.map((g) => (
           <li key={g.name}>
@@ -75,8 +82,7 @@ export function BrillianceDetails({ evidence }: { evidence: BrillianceEvidence }
         ))}
       </ul>
       <p className="small muted">
-        Experimental: a move that looks like a mistake to a search limited to {s.horizon} plies, but is the best, decisive move at
-        full depth. Engine depth is not the same as human difficulty; treat this as evidence, not a verdict.
+        {t('evidence.brilliantNote', { n: s.horizon })}
       </p>
     </div>
   );
@@ -85,32 +91,33 @@ export function BrillianceDetails({ evidence }: { evidence: BrillianceEvidence }
 const signed = (v: number | null) => (v === null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}`);
 
 export function GreatDetails({ evidence }: { evidence: GreatEvidence }) {
+  useT();
   const s = evidence.signals;
   return (
     <div className="stack">
       <p>
-        <strong>{evidence.verdict === 'great' ? 'Great move' : 'Not great'}</strong> · {evidence.version}
+        <strong>{evidence.verdict === 'great' ? t('evidence.great') : t('evidence.notGreat')}</strong> · {evidence.version}
       </p>
       <table className="data">
         <tbody>
           <tr>
-            <th>Lead over the next move, {s.horizon}-ply look</th>
+            <th>{t('evidence.leadShallow', { n: s.horizon })}</th>
             <td>
-              {signed(s.shallowLeadPct)} pts{s.shallowRivalUci ? ` vs ${s.shallowRivalUci}` : ''}
-              {s.shallowRank && s.legalMoves ? ` (${ordinal(s.shallowRank)} of ${s.legalMoves})` : ''}
+              {t('evidence.pts', { v: signed(s.shallowLeadPct) })}{s.shallowRivalUci ? ` ${t('stats.vs', { opponent: s.shallowRivalUci })}` : ''}
+              {s.shallowRank && s.legalMoves ? ` (${t('evidence.rankOf', { rank: ordinal(s.shallowRank), total: s.legalMoves })})` : ''}
             </td>
           </tr>
           <tr>
-            <th>Lead over the next move, full depth</th>
+            <th>{t('evidence.leadDeep')}</th>
             <td>
-              {signed(s.deepGapPct)} pts{s.deepRivalUci ? ` vs ${s.deepRivalUci}` : ''}
+              {t('evidence.pts', { v: signed(s.deepGapPct) })}{s.deepRivalUci ? ` ${t('stats.vs', { opponent: s.deepRivalUci })}` : ''}
             </td>
           </tr>
-          <tr><th>Lead on deeper recheck</th><td>{signed(s.recheckGapPct)} pts</td></tr>
-          <tr><th>Expected score (mover)</th><td>{n1(s.deepExpectedPct)}%</td></tr>
+          <tr><th>{t('evidence.leadRecheck')}</th><td>{t('evidence.pts', { v: signed(s.recheckGapPct) })}</td></tr>
+          <tr><th>{t('evidence.expected')}</th><td>{n1(s.deepExpectedPct)}%</td></tr>
         </tbody>
       </table>
-      <h3>Checks</h3>
+      <h3>{t('evidence.checks')}</h3>
       <ul className="small">
         {evidence.gates.map((g) => (
           <li key={g.name}>
@@ -119,8 +126,7 @@ export function GreatDetails({ evidence }: { evidence: GreatEvidence }) {
         ))}
       </ul>
       <p className="small muted">
-        Experimental: the best move, far better than every alternative at full depth, while a search limited to {s.horizon} plies
-        cannot tell it apart from them. Treat this as evidence, not a verdict.
+        {t('evidence.greatNote', { n: s.horizon })}
       </p>
     </div>
   );
@@ -139,7 +145,7 @@ export function EvidenceModal({ title, onClose, children }: { title: string; onC
       <div className="modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref} onClick={(e) => e.stopPropagation()}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <h2 style={{ margin: 0 }}>{title}</h2>
-          <button type="button" onClick={onClose}>Close</button>
+          <button type="button" onClick={onClose}>{t('common.close')}</button>
         </div>
         {children}
       </div>

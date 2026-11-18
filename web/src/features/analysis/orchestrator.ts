@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import {
   evaluateBrilliance,
   BRILLIANCY_VERSION,
@@ -83,7 +84,7 @@ export class GameAnalyser {
       moves: new Array(n).fill(undefined),
       positionEvals: new Array(n + 1).fill(undefined),
       phase: 'loading-engine',
-      progress: { done: 0, total: n + 1, label: 'Loading engine…' },
+      progress: { done: 0, total: n + 1, label: t('progress.loadingEngine') },
       startedAt: now(),
       updatedAt: now(),
     };
@@ -104,7 +105,7 @@ export class GameAnalyser {
       state.phase = 'first-pass';
       const roots: (PositionAnalysis | undefined)[] = new Array(n + 1).fill(undefined);
       let done = 0;
-      state.progress = { done: 0, total: n + 1, label: `Position 0/${n}` };
+      state.progress = { done: 0, total: n + 1, label: t('progress.position', { done: 0, total: n }) };
       await forEachConcurrent(consecutiveChunks(n + 1, this.parallel), this.parallel, (chunk) =>
         this.withEngine(async (on) => {
           for (const i of chunk) {
@@ -114,7 +115,7 @@ export class GameAnalyser {
             state.positionEvals[i] = roots[i]!.lines[0]?.score;
             if (i < n) state.moves[i] = await this.scoreMove(game.moves[i]!, roots[i]!, 'first', signal, on);
             done++;
-            state.progress = { done, total: n + 1, label: `Position ${done}/${n + 1}` };
+            state.progress = { done, total: n + 1, label: t('progress.position', { done, total: n + 1 }) };
             emit();
           }
         }, signal),
@@ -127,7 +128,7 @@ export class GameAnalyser {
         .filter(({ m }) => m && this.isInteresting(m))
         .slice(0, this.preset.maxDeepPositions);
       done = 0;
-      state.progress = { done: 0, total: interesting.length, label: `Deep check 0/${interesting.length}` };
+      state.progress = { done: 0, total: interesting.length, label: t('progress.deep', { done: 0, total: interesting.length }) };
       emit();
       await forEachConcurrent(interesting, this.parallel, async ({ idx }) => {
         throwIfAborted(signal);
@@ -141,7 +142,7 @@ export class GameAnalyser {
         state.moves[idx] = deeper.analysis;
         state.positionEvals[idx] = root.lines[0]?.score ?? state.positionEvals[idx];
         done++;
-        state.progress = { done, total: interesting.length, label: `Deep check ${done}/${interesting.length}` };
+        state.progress = { done, total: interesting.length, label: t('progress.deep', { done, total: interesting.length }) };
         emit();
       });
 
@@ -151,7 +152,7 @@ export class GameAnalyser {
         state.phase = 'brilliancy';
         const candidates = this.specialMoveCandidates(game, state, roots);
         done = 0;
-        state.progress = { done: 0, total: candidates.length, label: `Brilliant/great check 0/${candidates.length}` };
+        state.progress = { done: 0, total: candidates.length, label: t('progress.brilliant', { done: 0, total: candidates.length }) };
         emit();
         // Each check's own searches also run in parallel, so one candidate at a time per ~4 engines.
         await forEachConcurrent(candidates, Math.max(1, Math.ceil(this.parallel / 4)), async (idx) => {
@@ -164,7 +165,7 @@ export class GameAnalyser {
             return; // a failed research check never blocks the review
           } finally {
             done++;
-            state.progress = { done, total: candidates.length, label: `Brilliant/great check ${done}/${candidates.length}` };
+            state.progress = { done, total: candidates.length, label: t('progress.brilliant', { done, total: candidates.length }) };
           }
           const current = state.moves[idx]!;
           const reclass = classifyMove(
@@ -196,7 +197,7 @@ export class GameAnalyser {
 
       for (const m of state.moves) if (m) m.provisional = false;
       state.phase = 'done';
-      state.progress = { done: 1, total: 1, label: 'Complete' };
+      state.progress = { done: 1, total: 1, label: t('progress.complete') };
       emit();
       return state;
     } catch (e) {

@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import type { GameAnalysis } from '../analysis/types';
 
 /** Backend base URL (Phase 2). When unset, the app runs browser-only and hides account features. */
@@ -40,7 +41,7 @@ function messageFrom(body: unknown, status: number): string {
     const first = Object.entries(b)[0];
     if (first) return `${first[0]}: ${Array.isArray(first[1]) ? first[1].join(' ') : String(first[1])}`;
   }
-  return `Request failed (HTTP ${status}).`;
+  return t('api.err.http', { status });
 }
 
 export async function api<T>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
@@ -57,7 +58,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
       signal: init.signal,
     });
   } catch {
-    throw new ApiError('Could not reach the server.', 0);
+    throw new ApiError(t('api.err.network'), 0);
   }
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => undefined);

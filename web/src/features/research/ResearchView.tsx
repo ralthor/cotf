@@ -11,6 +11,7 @@ import { evaluateGreat, type GreatEvidence } from '../../core/brilliancy/great';
 import { IdbAnalysisCache } from '../../storage/db';
 import { GameAnalyser } from '../analysis/orchestrator';
 import { PRESETS } from '../analysis/types';
+import { useT } from '../../i18n/react';
 
 const cache = new IdbAnalysisCache();
 
@@ -51,6 +52,7 @@ function toMove(fen: string, moveText: string): MoveRecord {
  * (2) the depth-reversal brilliancy detector for one FEN + played move, with all raw evidence.
  */
 export function ResearchView() {
+  const { t } = useT();
   const { getEngine } = useEngine();
   const [fen, setFen] = useState(DEFAULT_POSITION);
   const [moveText, setMoveText] = useState('');
@@ -99,7 +101,7 @@ export function ResearchView() {
     try {
       mv = toMove(fen, moveText);
     } catch {
-      setError('That move is not legal in this position (use SAN like Bxh7+ or UCI like d3h7).');
+      setError(t('research.illegal'));
       return;
     }
     abortRef.current?.abort();
@@ -140,14 +142,14 @@ export function ResearchView() {
     <div className="layout">
       <div className="stack">
         <section className="panel stack">
-          <h2>Position</h2>
+          <h2>{t('research.position')}</h2>
           <label className="stack small">
             FEN
             <input value={fen} onChange={(e) => setFen(e.target.value.trim())} aria-invalid={!fenValid} />
           </label>
-          {!fenValid && <p className="error small">Invalid FEN.</p>}
+          {!fenValid && <p className="error small">{t('research.invalidFen')}</p>}
           <div className="row">
-            <button type="button" onClick={() => setFen(DEFAULT_POSITION)}>Start position</button>
+            <button type="button" onClick={() => setFen(DEFAULT_POSITION)}>{t('research.startPosition')}</button>
             {EXAMPLES.map((ex) => (
               <button
                 key={ex.label}
@@ -180,22 +182,22 @@ export function ResearchView() {
 
       <div className="stack">
         <section className="panel stack">
-          <h2>Single-position analysis</h2>
+          <h2>{t('research.single')}</h2>
           <div className="row small">
-            <label className="row">Depth <input type="number" min={1} max={40} value={depth} onChange={(e) => setDepth(Number(e.target.value))} style={{ width: 70 }} /></label>
+            <label className="row">{t('game.depth')} <input type="number" min={1} max={40} value={depth} onChange={(e) => setDepth(Number(e.target.value))} style={{ width: 70 }} /></label>
             <label className="row">MultiPV <input type="number" min={1} max={10} value={multiPv} onChange={(e) => setMultiPv(Number(e.target.value))} style={{ width: 60 }} /></label>
             {busy === 'analyse' ? (
-              <button type="button" className="danger" onClick={() => abortRef.current?.abort()}>Stop</button>
+              <button type="button" className="danger" onClick={() => abortRef.current?.abort()}>{t('research.stop')}</button>
             ) : (
-              <button type="button" className="primary" disabled={!fenValid || !!busy} onClick={() => void analyse()}>Analyse</button>
+              <button type="button" className="primary" disabled={!fenValid || !!busy} onClick={() => void analyse()}>{t('research.analyse')}</button>
             )}
           </div>
           {live && (
             <div aria-live="polite">
-              <p className="small muted">Depth {live.depth}{live.done ? ' (complete)' : '…'}</p>
+              <p className="small muted">{t('research.depth', { d: live.depth })}{live.done ? ` ${t('research.complete')}` : '…'}</p>
               <ol className="lines">
                 {live.lines.map((l) => (
-                  <li key={l.rank}><span className="score">{formatScore(l.score)}</span> {sanLine(l)}</li>
+                  <li key={l.rank}><span className="score">{formatScore(l.score)}</span> <span dir="ltr">{sanLine(l)}</span></li>
                 ))}
               </ol>
             </div>
@@ -203,47 +205,45 @@ export function ResearchView() {
         </section>
 
         <section className="panel stack">
-          <h2>Brilliancy research harness</h2>
+          <h2>{t('research.harness')}</h2>
           <p className="small muted">
-            Scores every legal move with a search limited to the shallow look (default 3 plies), follows the played move's own
-            score at every depth (<code>go … searchmoves</code>), then verifies at full depth and rechecks deeper. The hash is
-            cleared before each search.
+            {t('research.harness.note')}
           </p>
           <div className="row small">
-            <label className="row">Played move <input value={moveText} onChange={(e) => setMoveText(e.target.value)} placeholder="Bxh7+ or d3h7" style={{ width: 110 }} /></label>
-            <label className="row" title="How many plies the shallow look calculates">Shallow look (plies) <input type="number" min={1} max={6} value={shallowDepth} onChange={(e) => setShallowDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
-            <label className="row">Deep <input type="number" min={8} max={40} value={deepDepth} onChange={(e) => setDeepDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
-            <label className="row">Recheck <input type="number" min={8} max={40} value={recheckDepth} onChange={(e) => setRecheckDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
+            <label className="row">{t('evidence.playedMove')} <input value={moveText} onChange={(e) => setMoveText(e.target.value)} placeholder={t('research.movePlaceholder')} style={{ width: 110 }} /></label>
+            <label className="row" title={t('research.shallow.title')}>{t('research.shallow')} <input type="number" min={1} max={6} value={shallowDepth} onChange={(e) => setShallowDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
+            <label className="row">{t('research.deep')} <input type="number" min={8} max={40} value={deepDepth} onChange={(e) => setDeepDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
+            <label className="row">{t('research.recheck')} <input type="number" min={8} max={40} value={recheckDepth} onChange={(e) => setRecheckDepth(Number(e.target.value))} style={{ width: 60 }} /></label>
             {busy === 'brilliancy' ? (
-              <button type="button" className="danger" onClick={() => abortRef.current?.abort()}>Stop</button>
+              <button type="button" className="danger" onClick={() => abortRef.current?.abort()}>{t('research.stop')}</button>
             ) : (
               <button type="button" className="primary" disabled={!fenValid || !moveText.trim() || !!busy} onClick={() => void runBrilliancy()}>
-                Run detector
+                {t('research.run')}
               </button>
             )}
           </div>
-          {busy === 'brilliancy' && <p className="small muted">Running searches… deep depths can take a while in the browser.</p>}
+          {busy === 'brilliancy' && <p className="small muted">{t('research.running')}</p>}
           {error && <p className="error small" role="alert">{error}</p>}
           {evidence && (
             <>
               <BrillianceDetails evidence={evidence.result} />
-              <h3>Great move?</h3>
+              <h3>{t('research.greatQ')}</h3>
               <GreatDetails evidence={evidence.great} />
-              <h3>Depth trajectory (mover's perspective)</h3>
+              <h3>{t('research.trajectory')}</h3>
               <div style={{ overflowX: 'auto' }}>
                 <table className="data">
                   <thead>
-                    <tr><th>Depth</th><th>Played rank</th><th>Played score</th><th>Played exp.</th><th>Best at depth</th></tr>
+                    <tr><th>{t('game.depth')}</th><th>{t('research.playedRank')}</th><th>{t('research.playedScore')}</th><th>{t('research.playedExp')}</th><th>{t('research.bestAtDepth')}</th></tr>
                   </thead>
                   <tbody>
-                    {evidence.input.trajectory.map((t) => {
-                      const s = evidence.input.shallow.find((x) => x.depth === t.depth);
+                    {evidence.input.trajectory.map((tr) => {
+                      const s = evidence.input.shallow.find((x) => x.depth === tr.depth);
                       return (
-                        <tr key={t.depth}>
-                          <td>{t.depth}</td>
-                          <td>{s?.playedRank ? `${ordinal(s.playedRank)} of ${s.legalMoves}` : '—'}</td>
-                          <td>{formatScore(t.score)}</td>
-                          <td>{(expectedScore(t.score, evidence.input.mover) * 100).toFixed(1)}%</td>
+                        <tr key={tr.depth}>
+                          <td>{tr.depth}</td>
+                          <td>{s?.playedRank ? t('evidence.rankOf', { rank: ordinal(s.playedRank), total: s.legalMoves }) : '—'}</td>
+                          <td>{formatScore(tr.score)}</td>
+                          <td>{(expectedScore(tr.score, evidence.input.mover) * 100).toFixed(1)}%</td>
                           <td>{s ? formatScore(s.bestScore) : '—'}</td>
                         </tr>
                       );
@@ -252,9 +252,12 @@ export function ResearchView() {
                 </table>
               </div>
               <p className="small muted">
-                Deep (d{evidence.input.deep.depth}): best {evidence.input.deep.bestUci} {formatScore(evidence.input.deep.bestScore)}, second{' '}
-                {formatScore(evidence.input.deep.secondScore)}; recheck d{evidence.input.recheck?.depth ?? '—'}. Scores shown White-relative
-                except the expected-score column.
+                {t('research.deepSummary', {
+                  depth: evidence.input.deep.depth,
+                  best: `${evidence.input.deep.bestUci} ${formatScore(evidence.input.deep.bestScore)}`,
+                  second: formatScore(evidence.input.deep.secondScore),
+                  recheck: evidence.input.recheck?.depth ?? '—',
+                })}
               </p>
             </>
           )}

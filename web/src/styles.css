@@ -123,7 +123,7 @@ main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 .move-list button[aria-current='true'] { background: var(--surface-2); outline: 1px solid var(--accent); }
 .move-list button.dim { opacity: 0.35; }
 
-.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 700; color: #fff; }
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 700; color: #fff; direction: ltr; unicode-bidi: isolate; }
 .badge.brilliant { background: var(--cat-brilliant); }
 .badge.great { background: var(--cat-great); }
 .badge.best { background: var(--cat-best); }
@@ -139,8 +139,9 @@ main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 .pv-move { border: none; background: none; padding: 0 2px; font-family: inherit; font-size: inherit; color: var(--accent); }
 
 .summary-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.summary-table th, .summary-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: right; }
-.summary-table th:first-child, .summary-table td:first-child { text-align: left; }
+.summary-table th, .summary-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: end; }
+.summary-table th:first-child, .summary-table td:first-child { text-align: start; }
+.summary-table tbody th { white-space: nowrap; }
 
 .progress { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
 .progress > div { height: 100%; background: var(--accent); transition: width 0.2s; }
@@ -261,3 +262,24 @@ a.button-link:hover { border-color: var(--accent); }
 .segmented button { border: 0; border-radius: 0; min-height: 36px; padding: 0 14px; background: var(--surface); }
 .segmented button + button { border-left: 1px solid var(--border); }
 .segmented button[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); }
+
+/* Language menu in the header, and right-to-left tweaks (see src/i18n). */
+.lang-select {
+  font-size: 13px;
+  padding: 2px 4px;
+}
+[dir='rtl'] .move-list .num,
+[dir='rtl'] .line-score,
+[dir='rtl'] .eval-bar,
+[dir='rtl'] .eval-strip {
+  direction: ltr;
+}
+/* Keep the review layout (eval bar, board, side panel) in the same place in every language;
+   only the text inside the columns follows the language's direction. */
+[dir='rtl'] .review {
+  direction: ltr;
+}
+[dir='rtl'] .review > .board-col,
+[dir='rtl'] .review > .side {
+  direction: rtl;
+}

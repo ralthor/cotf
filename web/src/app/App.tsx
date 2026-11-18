@@ -15,8 +15,7 @@ import { useHashRoute, type Route } from './useHashRoute';
 import { clearDeepLink, importLichessGame, invalidDeepLinkReason, lichessGameRecordId, readDeepLink } from './deepLink';
 import { ImportError } from '../features/import/http';
 import { About, Disclaimer } from './About';
-
-const SAMPLE_PGN_GAME_NOTE = 'Tip: import a PGN or fetch your games from Chess.com or Lichess to begin.';
+import { LanguageSelect, useT } from '../i18n/react';
 
 export function App() {
   return (
@@ -30,12 +29,16 @@ export function App() {
 
 function Shell() {
   const route = useHashRoute();
+  const { t, tn, locale } = useT();
+  useEffect(() => {
+    document.title = t('app.title');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is a stable module function
+  }, [locale]);
   const [games, setGames] = useState<GameRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const gameColRef = useRef<HTMLDivElement>(null);
   const knownIds = useMemo(() => new Set(games.map((g) => g.id)), [games]);
   const [linkStatus, setLinkStatus] = useState<{ text: string; error: boolean } | null>(null);
-
 
   /** Brings the opened game into view: on phones it sits above the lists, off-screen. */
   const revealGame = () =>
@@ -63,7 +66,7 @@ function Shell() {
       if (!link) return;
       clearDeepLink(); // synchronously, so a second run (StrictMode, reload) finds nothing
       if (link.kind === 'invalid') {
-        setLinkStatus({ text: `Could not open the linked game: ${invalidDeepLinkReason(link.value)}`, error: true });
+        setLinkStatus({ text: t('app.link.invalid', { reason: invalidDeepLinkReason(link.value) }), error: true });
         return;
       }
       const linked = link.id;
@@ -73,13 +76,13 @@ function Shell() {
         revealGame();
         return;
       }
-      setLinkStatus({ text: `Importing Lichess game ${linked}…`, error: false });
+      setLinkStatus({ text: t('app.link.importing', { id: linked }), error: false });
       try {
         onImported([await importLichessGame(linked)]);
         setLinkStatus(null);
       } catch (e) {
         const reason = e instanceof ImportError ? e.message : (e as Error).message;
-        setLinkStatus({ text: `Could not open Lichess game ${linked}: ${reason}`, error: true });
+        setLinkStatus({ text: t('app.link.failed', { id: linked, reason }), error: true });
       }
     };
     void gameStore.list().then((list) => {
@@ -90,6 +93,7 @@ function Shell() {
     const onHash = () => void openLinked();
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is a stable module function
   }, [onImported]);
 
   const select = (id: string) => {
@@ -105,18 +109,18 @@ function Shell() {
 
   const selected = games.find((g) => g.id === selectedId) ?? null;
   const nav: { route: Route; label: string; show: boolean }[] = [
-    { route: 'analyse', label: 'Analyse', show: true },
-    { route: 'research', label: 'Research', show: true },
-    { route: 'library', label: 'Library', show: backendEnabled },
-    { route: 'stats', label: 'Stats', show: backendEnabled },
-    { route: 'about', label: 'About', show: true },
+    { route: 'analyse', label: t('nav.analyse'), show: true },
+    { route: 'research', label: t('nav.research'), show: true },
+    { route: 'library', label: t('nav.library'), show: backendEnabled },
+    { route: 'stats', label: t('nav.stats'), show: backendEnabled },
+    { route: 'about', label: t('nav.about'), show: true },
   ];
 
   return (
     <>
       <header className="app-header">
-        <h1>Chess Game Analyser</h1>
-        <nav aria-label="Main">
+        <h1>{t('app.title')}</h1>
+        <nav aria-label={t('nav.main')}>
           {nav
             .filter((n) => n.show)
             .map((n) => (
@@ -126,7 +130,8 @@ function Shell() {
             ))}
         </nav>
         <span className="spacer" />
-        <span className="small muted hide-mobile">Completed games only · no live assistance</span>
+        <span className="small muted hide-mobile">{t('app.tagline')}</span>
+        <LanguageSelect className="lang-select" />
       </header>
       <main>
         {route === 'analyse' && (
@@ -137,16 +142,16 @@ function Shell() {
                   {linkStatus.text}
                   {linkStatus.error && (
                     <button type="button" className="link small" onClick={() => setLinkStatus(null)}>
-                      Dismiss
+                      {t('common.dismiss')}
                     </button>
                   )}
                 </p>
               )}
               <ImportPanel onImported={onImported} knownIds={knownIds} />
               <section className="panel" aria-labelledby="games-title">
-                <h2 id="games-title">Games ({games.length})</h2>
+                <h2 id="games-title">{t('app.games', { n: games.length })}</h2>
                 {games.length === 0 ? (
-                  <p className="small muted">{SAMPLE_PGN_GAME_NOTE}</p>
+                  <p className="small muted">{t('app.games.empty')}</p>
                 ) : (
                   <ul className="game-list">
                     {games.map((g) => (
@@ -159,10 +164,10 @@ function Shell() {
                         >
                           {gameTitle(g)}
                           <div className="meta">
-                            {g.source} · {g.moves.length} plies
+                            {g.source} · {tn('app.plies', g.moves.length)}
                           </div>
                         </button>
-                        <button type="button" className="link small remove-game" aria-label={`Remove ${gameTitle(g)}`} onClick={() => remove(g.id)}>
+                        <button type="button" className="link small remove-game" aria-label={t('app.games.remove', { title: gameTitle(g) })} onClick={() => remove(g.id)}>
                           ✕
                         </button>
                       </li>
@@ -180,7 +185,7 @@ function Shell() {
                 />
               ) : (
                 <div className="panel">
-                  <p>Select or import a finished game to review it with Stockfish in your browser.</p>
+                  <p>{t('app.selectGame')}</p>
                 </div>
               )}
             </div>

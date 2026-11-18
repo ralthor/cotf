@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import { parseSingleGame } from '../../core/chess/pgn';
 import type { GameRecord } from '../../core/chess/types';
 import { ImportError, isRecord, ProviderHttpClient, readNdjson, type FetchLike } from './http';
@@ -32,7 +33,7 @@ const ID_RE = /^[A-Za-z0-9]{8}$/;
 
 export function normaliseLichessUsername(input: string): string {
   const u = input.trim().replace(/^@/, '');
-  if (!USERNAME_RE.test(u)) throw new ImportError('invalid-input', 'Enter a valid Lichess username.');
+  if (!USERNAME_RE.test(u)) throw new ImportError('invalid-input', t('import.err.lichessUsername'));
   return u;
 }
 
@@ -65,7 +66,7 @@ function sanitise(raw: unknown): LichessGame | null {
   const player = (v: unknown) => {
     if (!isRecord(v)) return undefined;
     const user = isRecord(v.user) ? v.user : undefined;
-    return { name: str(user?.name) ?? (v.aiLevel ? `Stockfish level ${String(v.aiLevel)}` : undefined), rating: num(v.rating) };
+    return { name: str(user?.name) ?? (v.aiLevel ? t('import.stockfishLevel', { level: String(v.aiLevel) }) : undefined), rating: num(v.rating) };
   };
   const players = isRecord(raw.players) ? raw.players : {};
   const opening = isRecord(raw.opening) ? str(raw.opening.name) : undefined;
@@ -155,24 +156,24 @@ export class LichessClient {
   /** Fetches one game by ID or URL. Available immediately after the game ends. */
   async game(idOrUrl: string, signal?: AbortSignal): Promise<LichessGame> {
     const id = parseLichessGameId(idOrUrl);
-    if (!id) throw new ImportError('invalid-input', 'That does not look like a Lichess game URL or ID.');
+    if (!id) throw new ImportError('invalid-input', t('link.notGame'));
     const params = new URLSearchParams({ pgnInJson: 'true', clocks: 'true', opening: 'true' });
     const body = await this.http.getText(`${LICHESS_ORIGIN}/game/export/${id}?${params}`, 'application/json', signal);
     let data: unknown;
     try {
       data = JSON.parse(body);
     } catch {
-      throw new ImportError('invalid-data', 'Lichess returned an unreadable game.');
+      throw new ImportError('invalid-data', t('import.err.lichessUnreadable'));
     }
     const g = sanitise(data);
-    if (!g) throw new ImportError('invalid-data', 'Lichess returned an unexpected game format.');
+    if (!g) throw new ImportError('invalid-data', t('import.err.lichessFormat'));
     const ok = isAnalysable(g);
     if (!ok.ok) {
       throw new ImportError(
         'unsupported',
         ok.reason === 'game not finished'
-          ? 'This game is still in progress. Only finished games can be analysed.'
-          : `This game cannot be analysed: ${ok.reason}.`,
+          ? t('import.err.inProgress')
+          : t('import.err.unsupported', { reason: ok.reason }),
       );
     }
     return g;
@@ -180,7 +181,7 @@ export class LichessClient {
 }
 
 export function lichessToGameRecord(g: LichessGame): GameRecord {
-  if (!g.pgn) throw new ImportError('invalid-data', 'This Lichess game has no PGN.');
+  if (!g.pgn) throw new ImportError('invalid-data', t('import.err.lichessNoPgn'));
   return parseSingleGame(g.pgn, {
     source: 'lichess',
     sourceUrl: `${LICHESS_ORIGIN}/${g.id}`,

@@ -1,6 +1,7 @@
 import type { EngineScore } from '../core/engine/types';
 import type { MoveCategory } from '../core/classification/classify';
 import { expectedScore, formatScore } from '../core/scoring/score';
+import { useT } from '../i18n/react';
 
 type Props = {
   evals: (EngineScore | undefined)[];
@@ -14,6 +15,7 @@ const H = 120;
 
 /** White's expected score across the game (0..1), with markers for serious errors. */
 export function EvalChart({ evals, categories, current, onSelect }: Props) {
+  const { t } = useT();
   const n = evals.length;
   if (n < 2) return null;
   const x = (i: number) => (i / (n - 1)) * W;
@@ -43,7 +45,7 @@ export function EvalChart({ evals, categories, current, onSelect }: Props) {
       preserveAspectRatio="none"
       onClick={handle}
       role="img"
-      aria-label={`Evaluation graph. Current position ${current}: ${formatScore(evals[current])}`}
+      aria-label={t('eval.chart', { pos: current, score: formatScore(evals[current]) })}
     >
       <rect width={W} height={H} fill="var(--eval-black)" />
       {area && <path d={area} fill="var(--eval-white)" />}

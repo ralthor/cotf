@@ -3,7 +3,6 @@ import { gameTitle } from '../core/chess/pgn';
 import type { GameRecord } from '../core/chess/types';
 import { GameView } from '../features/game/GameView';
 import { ImportPanel } from '../features/import/ImportPanel';
-import { ResearchView } from '../features/research/ResearchView';
 import { backendEnabled } from '../features/library/api';
 import { AuthProvider } from '../features/library/AuthContext';
 import { LibraryView } from '../features/library/LibraryView';
@@ -110,7 +109,6 @@ function Shell() {
   const selected = games.find((g) => g.id === selectedId) ?? null;
   const nav: { route: Route; label: string; show: boolean }[] = [
     { route: 'analyse', label: t('nav.analyse'), show: true },
-    { route: 'research', label: t('nav.research'), show: true },
     { route: 'library', label: t('nav.library'), show: backendEnabled },
     { route: 'stats', label: t('nav.stats'), show: backendEnabled },
     { route: 'about', label: t('nav.about'), show: true },
@@ -191,7 +189,6 @@ function Shell() {
             </div>
           </div>
         )}
-        {route === 'research' && <ResearchView />}
         {route === 'library' && backendEnabled && <LibraryView onOpenGame={onImported} />}
         {route === 'stats' && backendEnabled && <StatsView />}
         {route === 'about' && <About />}

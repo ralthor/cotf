@@ -36,9 +36,21 @@ export const LOCALES: LocaleInfo[] = Object.keys(dicts)
 let current = FALLBACK_LOCALE;
 const listeners = new Set<() => void>();
 
+/** First-strong isolate … pop directional isolate (Unicode bidi controls). */
+const FSI = '⁨';
+const PDI = '⁩';
+
 function interpolate(text: string, vars?: Vars): string {
   if (!vars) return text;
-  return text.replace(/\{(\w+)\}/g, (m, name: string) => (name in vars ? String(vars[name]) : m));
+  // In right-to-left languages each filled-in value is isolated, so chess moves and evals such as
+  // "Qxe4+" or "-0.50 → -6.49" keep their own order instead of being reordered by the sentence
+  // around them. A value in Persian still reads right to left (FSI follows its first letter).
+  const isolate = localeInfo(current).dir === 'rtl';
+  return text.replace(/\{(\w+)\}/g, (m, name: string) => {
+    if (!(name in vars)) return m;
+    const value = String(vars[name]);
+    return isolate && value !== '' ? FSI + value + PDI : value;
+  });
 }
 
 /** Translated text for `key`, with `{name}` placeholders filled from `vars`. */

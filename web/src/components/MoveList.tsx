@@ -62,7 +62,8 @@ export function MoveList({
         onClick={() => onSelect(i + 1)}
         aria-label={`${m.fullMoveNumber}${m.colour === 'w' ? '.' : '...'} ${m.san}${a?.category ? `, ${categoryLabel(a.category)}` : ''}`}
       >
-        <span>{m.san}</span>
+        {/* Chess notation is always left to right; without this, Persian shows "Qxe4+" as "+Qxe4". */}
+        <bdi dir="ltr">{m.san}</bdi>
         <CategoryBadge category={a?.category} candidate={a?.brilliance?.verdict === 'candidate'} />
       </button>
     );

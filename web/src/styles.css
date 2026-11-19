@@ -274,7 +274,6 @@ a.button-link:hover { border-color: var(--accent); }
   padding: 2px 4px;
 }
 [dir='rtl'] .move-list .num,
-[dir='rtl'] .line-score,
 [dir='rtl'] .eval-bar,
 [dir='rtl'] .eval-strip {
   direction: ltr;

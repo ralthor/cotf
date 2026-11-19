@@ -175,7 +175,10 @@ function LineRow({
   return (
     <div className="line-row">
       <div className="small muted">
-        {label} <strong className="line-score">{formatScore(score)}</strong>
+        {label}{' '}
+        <strong className="line-score">
+          <bdi dir="ltr">{formatScore(score)}</bdi>
+        </strong>
       </div>
       <div className="line-moves" dir="ltr">{numberedLine(fen, san)}</div>
       <button type="button" className="small" onClick={onPlay}>
@@ -212,8 +215,11 @@ export function MoveFeedback(p: Props) {
           {a?.category && <span>{categoryLabel(a.category)}</span>}
           {a?.playedScore && (
             <span className="small muted">
-              {t('feedback.eval')} {notBest && a.bestScore ? `${formatScore(a.bestScore)} → ` : ''}
-              {formatScore(a.playedScore)}
+              {t('feedback.eval')}{' '}
+              <bdi dir="ltr">
+                {notBest && a.bestScore ? `${formatScore(a.bestScore)} → ` : ''}
+                {formatScore(a.playedScore)}
+              </bdi>
             </span>
           )}
         </div>

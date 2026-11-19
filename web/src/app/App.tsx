@@ -15,6 +15,7 @@ import { clearDeepLink, importLichessGame, invalidDeepLinkReason, lichessGameRec
 import { ImportError } from '../features/import/http';
 import { About, Disclaimer } from './About';
 import { LanguageSelect, useT } from '../i18n/react';
+import { Icon } from '../components/Icon';
 
 export function App() {
   return (
@@ -38,6 +39,8 @@ function Shell() {
   const gameColRef = useRef<HTMLDivElement>(null);
   const knownIds = useMemo(() => new Set(games.map((g) => g.id)), [games]);
   const [linkStatus, setLinkStatus] = useState<{ text: string; error: boolean } | null>(null);
+  // Phones: import and the game list fold into a "Games" panel above the board (null = automatic).
+  const [gamesOpen, setGamesOpen] = useState<boolean | null>(null);
 
   /** Brings the opened game into view: on phones it sits above the lists, off-screen. */
   const revealGame = () =>
@@ -52,6 +55,7 @@ function Shell() {
       return [...imported, ...prev.filter((g) => !ids.has(g.id))];
     });
     if (imported[0]) setSelectedId(imported[0].id);
+    setGamesOpen(false);
     for (const g of imported) void gameStore.put(g);
     if (window.location.hash !== '#/analyse' && window.location.hash !== '') window.location.hash = '#/analyse';
     revealGame();
@@ -97,16 +101,21 @@ function Shell() {
 
   const select = (id: string) => {
     setSelectedId(id);
+    setGamesOpen(false);
     revealGame();
   };
 
   const remove = (id: string) => {
     void gameStore.remove(id);
     setGames((g) => g.filter((x) => x.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    if (selectedId === id) {
+      setSelectedId(null);
+      setGamesOpen(null);
+    }
   };
 
   const selected = games.find((g) => g.id === selectedId) ?? null;
+  const showGames = gamesOpen ?? !selected;
   const nav: { route: Route; label: string; show: boolean }[] = [
     { route: 'analyse', label: t('nav.analyse'), show: true },
     { route: 'library', label: t('nav.library'), show: backendEnabled },
@@ -134,9 +143,28 @@ function Shell() {
       <main>
         {route === 'analyse' && (
           <div className="layout">
-            <div className="stack">
+            <button
+              type="button"
+              className="games-toggle"
+              aria-expanded={showGames}
+              aria-controls="games-panel"
+              onClick={() => setGamesOpen(!showGames)}
+            >
+              <span className="games-toggle-title">
+                <strong>{selected ? <bdi>{gameTitle(selected)}</bdi> : t('app.games.none')}</strong>
+                {selected && (
+                  <span className="meta">
+                    {selected.source} · {tn('app.plies', selected.moves.length)}
+                  </span>
+                )}
+              </span>
+              <span className="games-toggle-label">
+                {t('app.games.toggle')} <Icon name="chevronDown" size={16} />
+              </span>
+            </button>
+            <div className="stack games-col" id="games-panel" data-open={showGames ? '' : undefined}>
               {linkStatus && (
-                <p className={linkStatus.error ? 'notice error' : 'notice'} role={linkStatus.error ? 'alert' : 'status'}>
+                <p className={linkStatus.error ? 'notice error link-status' : 'notice link-status'} role={linkStatus.error ? 'alert' : 'status'}>
                   {linkStatus.text}
                   {linkStatus.error && (
                     <button type="button" className="link small" onClick={() => setLinkStatus(null)}>

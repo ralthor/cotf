@@ -3,6 +3,7 @@ import type { EngineLine } from '../../core/engine/types';
 import { numberedLine, uciLineToSan } from '../../core/chess/lines';
 import { formatScore } from '../../core/scoring/score';
 import { CategoryBadge } from '../../components/CategoryBadge';
+import { Spinner } from '../../components/Icon';
 import type { MoveAnalysis } from '../analysis/types';
 import type { PositionThreats, ThreatReport, WhyBadCause, WhyBadReport } from '../../core/explain/whyBad';
 import type { Pending } from '../explain/useMoveExplainer';
@@ -201,7 +202,7 @@ export function MoveFeedback(p: Props) {
 
   return (
     <section className="panel move-feedback" aria-label={t('feedback.title')} aria-live="polite">
-      {move ? (
+      {move && (
         <div className="row">
           <strong dir="ltr">
             {move.fullMoveNumber}
@@ -216,11 +217,7 @@ export function MoveFeedback(p: Props) {
             </span>
           )}
         </div>
-      ) : (
-        <div className="small muted">{t('feedback.start')}</div>
       )}
-
-      {!p.analysed && <p className="small muted">{t('feedback.analyseFirst')}</p>}
 
       {move && a && notBest && (
         <div className="stack" style={{ gap: 6, marginTop: 6 }}>
@@ -279,7 +276,11 @@ export function MoveFeedback(p: Props) {
               <button type="button" onClick={p.onWhyBad}>{t('feedback.whyBad')}</button>
             </div>
           ) : p.whyBad.status === 'running' ? (
-            <div className="small muted">{t('feedback.whyBad.running')}</div>
+            <div className="row">
+              <button type="button" className="busy" disabled aria-busy="true">
+                <Spinner /> {t('feedback.whyBad.running')}
+              </button>
+            </div>
           ) : p.whyBad.status === 'error' ? (
             <div className="small error" role="alert">
               {t('feedback.whyBad.error', { error: p.whyBad.error })} <button type="button" className="link small" onClick={p.onWhyBad}>{t('common.retry')}</button>
@@ -329,17 +330,21 @@ export function MoveFeedback(p: Props) {
         </div>
       )}
 
-      {p.onFindThreat && !p.threat && (
+      {p.onFindThreat && (!p.threat || p.threat.status === 'running') && (
         <div className="row" style={{ marginTop: 6 }}>
           <span className="small">{t('feedback.threatQuestion')}</span>
-          <button type="button" onClick={p.onFindThreat}>{t('feedback.showThreat')}</button>
+          {p.threat ? (
+            <button type="button" className="busy" disabled aria-busy="true">
+              <Spinner /> {t('feedback.threat.running')}
+            </button>
+          ) : (
+            <button type="button" onClick={p.onFindThreat}>{t('feedback.showThreat')}</button>
+          )}
         </div>
       )}
-      {p.threat && (
+      {p.threat && p.threat.status !== 'running' && (
         <div style={{ marginTop: 6 }}>
-          {p.threat.status === 'running' ? (
-            <div className="small muted">{t('feedback.threat.running')}</div>
-          ) : p.threat.status === 'error' ? (
+          {p.threat.status === 'error' ? (
             <div className="small error" role="alert">{t('feedback.threat.error', { error: p.threat.error })}</div>
           ) : (
             <ThreatView threats={p.threat.value} boardFen={p.boardFen} />

@@ -209,12 +209,17 @@ a.button-link:hover { border-color: var(--accent); }
     background: var(--surface); border-top: 1px solid var(--border);
     flex-wrap: nowrap; gap: 6px;
   }
-  .controls > button, .controls > a.button-link { flex: 1; min-height: 44px; justify-content: center; font-size: 18px; padding: 6px 4px; }
-  .controls > a.button-link { font-size: 14px; flex: 1.4; }
+  .controls > button { flex: 1; min-height: 44px; }
 
-  /* Current move right under the board, then controls, moves, summary. */
-  .side .current-move { order: -2; }
-  .side .analysis-controls { order: -1; }
+  /* Game picker: a bar above the board that opens import and the game list. */
+  .layout > .games-toggle { display: flex; order: -3; }
+  .layout > .games-col { order: -2; }
+  .games-col:not([data-open]) > :not(.link-status) { display: none; }
+  .games-col[data-open] { margin-top: -8px; }
+  /* The picker bar already names the game; keep only flip and Lichess above the board. */
+  .game-title { justify-content: flex-end; }
+  .game-title h2 { display: none; }
+  .games-col[data-open] > .panel:first-of-type { border-top-left-radius: 0; border-top-right-radius: 0; }
 
   button, select, input { min-height: 40px; }
   .move-list { max-height: 260px; font-size: 15px; }
@@ -282,4 +287,70 @@ a.button-link:hover { border-color: var(--accent); }
 [dir='rtl'] .review > .board-col,
 [dir='rtl'] .review > .side {
   direction: rtl;
+}
+
+/* ---- Icons, busy states and the "ready" bar ---- */
+.icon { display: block; flex: none; }
+.controls > button { display: inline-flex; align-items: center; justify-content: center; min-width: 52px; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; padding: 6px 8px; }
+.game-title { flex-wrap: nowrap; }
+.game-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-title > a.button-link { white-space: nowrap; font-size: 14px; padding: 5px 10px; }
+
+.spinner {
+  display: inline-block; width: 1em; height: 1em; flex: none; vertical-align: -0.15em;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+button.busy { display: inline-flex; align-items: center; gap: 8px; }
+button.busy:disabled { opacity: 1; cursor: progress; color: var(--muted); border-style: dashed; }
+
+.board-busy {
+  position: absolute; top: 8px; inset-inline-end: 8px; z-index: 4; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  background: rgba(20, 22, 26, 0.82); color: #fff; font-size: 13px; font-weight: 600;
+}
+
+.analyse-cta { margin-top: 10px; }
+.analyse-cta p { margin: 6px 0 0; }
+.analyse-start { display: flex; gap: 8px; align-items: stretch; }
+.analyse-start > button.primary.big { flex: 1; min-height: 48px; font-size: 17px; font-weight: 600; }
+.analyse-start > select { flex: 0 1 auto; min-width: 0; max-width: 45%; }
+.analyse-progress { display: flex; gap: 8px; align-items: stretch; }
+.analyse-progress-bar {
+  flex: 1; position: relative; min-height: 48px; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--accent); background: var(--surface);
+}
+.analyse-progress-bar > div { position: absolute; inset-block: 0; inset-inline-start: 0; background: var(--accent); opacity: 0.3; transition: width 0.2s; }
+.analyse-progress-bar > span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; }
+
+.toast {
+  position: fixed; inset-inline: 12px; bottom: 16px; z-index: 20; margin: 0 auto; max-width: 520px;
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--accent); color: var(--accent-text); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.toast > span { flex: 1; font-weight: 600; }
+.toast > button { display: inline-flex; align-items: center; gap: 4px; background: transparent; color: inherit; border-color: currentColor; white-space: nowrap; }
+.toast > button.toast-close { border: none; padding: 4px 6px; }
+
+/* Game picker bar: phones only (see the phone layout above). */
+.games-toggle {
+  display: none; width: 100%; align-items: center; gap: 10px; text-align: start;
+  padding: 8px 12px; border-radius: var(--radius); background: var(--surface);
+}
+.games-toggle-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.games-toggle-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.games-toggle .meta { font-size: 12px; color: var(--muted); }
+.games-toggle-label { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--accent); }
+.games-toggle[aria-expanded='true'] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.games-toggle[aria-expanded='true'] .icon { transform: rotate(180deg); }
+
+/* Long engine names must not push the settings panel wider than its column. */
+.analysis-controls label { max-width: 100%; min-width: 0; }
+.analysis-controls select { max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+@media (max-width: 700px) {
+  .layout { gap: 8px; }
+  .game-col > .stack { gap: 8px; }
 }

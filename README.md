@@ -68,6 +68,14 @@ the selected repertoire:
 - results per chapter (score, wins, draws, losses, moves in book);
 - **Start from your games**: a new repertoire from the moves you play most.
 
+- **Your openings**: your games grouped by the opening they reached, with your score.
+
+Positions are named with ECO codes and opening names from the Lichess
+[chess-openings](https://github.com/lichess-org/chess-openings) dataset (CC0), bundled and available
+offline. In Browse, the optional **Explorer statistics** panel shows how often each move is played and
+how it scores: the Masters database works as is; the Lichess players database needs your own Lichess
+API token (no permissions), kept in this browser.
+
 Only the players, result, date and first 40 moves of each game are kept, in this browser. Only
 standard chess is supported; see `docs/OPENING_TRAINER.md` for what comes next.
 

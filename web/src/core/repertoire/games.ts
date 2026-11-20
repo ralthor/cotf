@@ -93,6 +93,8 @@ export type GameCheck = {
   played?: { san: string; uci: string };
   /** The repertoire's moves there (SAN). */
   expected?: string[];
+  /** Positions from the start up to where the game left or the walk stopped. */
+  keys: PosKey[];
 };
 
 /** Walks a game through the repertoire graph of the side the user played, up to where it leaves it. */
@@ -101,15 +103,16 @@ export function compareGame(graphs: Readonly<Record<Side, TrainGraph>>, game: Op
   const g = graphs[side];
   const pos = Chess.default();
   const base = { gameId: game.id, side };
-  let chapters = g.chapters.filter((c) => c.root.posKey === posKey(pos)).map((c) => c.id);
-  if (!chapters.length) return { ...base, kind: 'none', inBook: 0, chapters: [] };
+  const keys = [posKey(pos)];
+  let chapters = g.chapters.filter((c) => c.root.posKey === keys[0]).map((c) => c.id);
+  if (!chapters.length) return { ...base, kind: 'none', inBook: 0, chapters: [], keys };
   for (let i = 0; i < game.moves.length; i++) {
-    const key = posKey(pos);
+    const key = keys[keys.length - 1]!;
     const out = g.from.get(key) ?? [];
-    if (!out.length) return { ...base, kind: 'followed', inBook: i, chapters };
+    if (!out.length) return { ...base, kind: 'followed', inBook: i, chapters, keys };
     const san = game.moves[i]!.san;
     const move = parseSan(pos, san);
-    if (!move) return { ...base, kind: 'followed', inBook: i, chapters };
+    if (!move) return { ...base, kind: 'followed', inBook: i, chapters, keys };
     const uci = standardUci(pos, move);
     const m = out.find((x) => x.uci === uci);
     if (!m) {
@@ -124,12 +127,14 @@ export function compareGame(graphs: Readonly<Record<Side, TrainGraph>>, game: Op
         fen: makeFen(pos.toSetup()),
         played: { san, uci },
         expected: out.map((x) => x.san),
+        keys,
       };
     }
     chapters = narrowChapters(g, chapters, m);
     pos.play(move);
+    keys.push(posKey(pos));
   }
-  return { ...base, kind: 'followed', inBook: game.moves.length, chapters };
+  return { ...base, kind: 'followed', inBook: game.moves.length, chapters, keys };
 }
 
 /** One (position, move) where games left the repertoire, with the games it happened in. */
@@ -142,6 +147,8 @@ export type Deviation = {
   expected: string[];
   /** "1. e4 c5 2. Nf3" up to the move. */
   line: string;
+  /** Positions from the start to the one where the move was played. */
+  keys: PosKey[];
   games: OpeningGame[];
 };
 
@@ -190,6 +197,7 @@ export function summariseGames(graphs: Readonly<Record<Side, TrainGraph>>, games
         played: c.played,
         expected: c.expected ?? [],
         line: sanLine(game.moves, (c.ply ?? 0) + 1),
+        keys: c.keys,
         games: [],
       };
       d.games.push(game);
@@ -219,4 +227,43 @@ export function summariseGames(graphs: Readonly<Record<Side, TrainGraph>>, games
     chapters: [...chapters.values()].sort((a, b) => b.games - a.games),
     averageInBook: inRepertoire ? bookTotal / inRepertoire : 0,
   };
+}
+
+/** Position keys along a game's first `plies` moves (fewer if a move cannot be read). */
+export function gameKeys(game: OpeningGame, plies = 24): PosKey[] {
+  const pos = Chess.default();
+  const keys = [posKey(pos)];
+  for (const m of game.moves.slice(0, plies)) {
+    const move = parseSan(pos, m.san);
+    if (!move) break;
+    pos.play(move);
+    keys.push(posKey(pos));
+  }
+  return keys;
+}
+
+export type OpeningResult = { name: string; eco: string; side: Side; games: number; wins: number; draws: number; losses: number };
+
+/**
+ * Your games grouped by the opening they reached (named by `name` from their positions) and the
+ * side you played, most played first.
+ */
+export function openingResults(
+  games: readonly OpeningGame[],
+  name: (keys: readonly PosKey[]) => { eco: string; name: string } | null,
+): OpeningResult[] {
+  const by = new Map<string, OpeningResult>();
+  for (const g of games) {
+    const o = name(gameKeys(g));
+    if (!o) continue;
+    const key = `${g.userColour}|${o.name}`;
+    const r = by.get(key) ?? { name: o.name, eco: o.eco, side: g.userColour, games: 0, wins: 0, draws: 0, losses: 0 };
+    const s = userScore(g);
+    r.games++;
+    if (s === 1) r.wins++;
+    else if (s === 0.5) r.draws++;
+    else if (s === 0) r.losses++;
+    by.set(key, r);
+  }
+  return [...by.values()].sort((a, b) => b.games - a.games || a.name.localeCompare(b.name));
 }

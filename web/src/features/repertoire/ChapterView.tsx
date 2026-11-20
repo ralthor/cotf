@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { lichessAnalysisUrl } from '../../core/chess/links';
 import { nagKey, nagText } from '../../core/repertoire/nags';
-import { displayComments, nodeAt } from '../../core/repertoire/parse';
+import { openingOf } from '../../core/openings/names';
+import { displayComments, nodeAt, nodesOnPath } from '../../core/repertoire/parse';
 import type { Chapter, Eval, RepNode, ShapeColor } from '../../core/repertoire/types';
 import { Icon } from '../../components/Icon';
 import { t } from '../../i18n';
 import { useT } from '../../i18n/react';
 import { sideLabel } from './RepertoireList';
+import { ExplorerPanel } from './ExplorerPanel';
+import { useOpenings } from './useOpenings';
 import { VariationTree } from './VariationTree';
 
 /** Lichess' study colours, so arrows look as they did in the study. */
@@ -124,6 +127,8 @@ export function ChapterView({ chapter }: { chapter: Chapter }) {
   const lichessChapter = chapter.source.kind === 'lichess-study' ? chapter.source.url : null;
   const nextMoves = node.children;
   const before = displayComments(node.commentsBefore);
+  const openings = useOpenings();
+  const opening = useMemo(() => (openings ? openingOf(openings, nodesOnPath(root, path).map((n) => n.posKey)) : null), [openings, root, path]);
   const after = displayComments(node.comments);
 
   return (
@@ -152,6 +157,14 @@ export function ChapterView({ chapter }: { chapter: Chapter }) {
         </a>
       </div>
 
+      {opening && (
+        <p className="opening-name small" style={{ margin: '-4px 0 0' }}>
+          <span className="muted" dir="ltr">
+            {opening.eco}
+          </span>{' '}
+          <bdi>{opening.name}</bdi>
+        </p>
+      )}
       <div className="chapter-view">
         <div className="board-col">
           <div className="board-wrap" dir="ltr" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
@@ -242,6 +255,7 @@ export function ChapterView({ chapter }: { chapter: Chapter }) {
               {t('repertoire.keys')}
             </p>
           </section>
+          <ExplorerPanel node={node} onPlay={(i) => go([...path, i])} />
         </div>
       </div>
     </div>

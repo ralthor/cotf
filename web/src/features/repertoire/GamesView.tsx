@@ -3,7 +3,8 @@ import { CategoryBadge } from '../../components/CategoryBadge';
 import { categoryLabel } from '../../components/categoryText';
 import { lichessAnalysisUrl } from '../../core/chess/links';
 import { discoverRepertoire } from '../../core/repertoire/discover';
-import { summariseGames, type Deviation, type OpeningGame } from '../../core/repertoire/games';
+import { family, openingOf, type OpeningTable } from '../../core/openings/names';
+import { openingResults, summariseGames, type Deviation, type OpeningGame } from '../../core/repertoire/games';
 import { buildTrainGraph } from '../../core/repertoire/trainer';
 import type { Chapter, PosKey, Repertoire, Side } from '../../core/repertoire/types';
 import { formatScore } from '../../core/scoring/score';
@@ -14,6 +15,7 @@ import { ImportError } from '../import/http';
 import { TrainingBoard } from './TrainerView';
 import { useTrainer } from './useTrainer';
 import { isPlayable, useOpeningGames } from './useOpeningGames';
+import { useOpenings } from './useOpenings';
 import type { ImportOrigin, ImportSummary, ImportTarget } from './useRepertoires';
 
 const ROWS = 15;
@@ -182,6 +184,8 @@ export function GamesView({
   const games = useMemo(() => (timeClass ? og.games.filter((g) => g.timeClass === timeClass) : og.games), [og.games, timeClass]);
   const graphs = useMemo(() => ({ w: buildTrainGraph(chapters, 'w'), b: buildTrainGraph(chapters, 'b') }), [chapters]);
   const summary = useMemo(() => summariseGames(graphs, games), [graphs, games]);
+  const openings = useOpenings();
+  const nameAt = (keys: readonly string[]) => (openings ? openingOf(openings, keys)?.name : undefined);
   const { loadGrades } = og;
   useEffect(() => {
     void loadGrades(summary.you);
@@ -290,6 +294,9 @@ export function GamesView({
                     <bdi dir="ltr" className="mistake-line">
                       {d.line}
                     </bdi>
+                    {nameAt(d.keys) && (
+                      <bdi className="small">{nameAt(d.keys)}</bdi>
+                    )}
                     <span className="small muted">
                       {sideName(d.side)} · {tn('games.you.row', d.games.length, { san: d.played.san, expected: d.expected.join(', ') })}
                     </span>
@@ -327,6 +334,7 @@ export function GamesView({
                   <bdi dir="ltr" className="mistake-line">
                     {d.line}
                   </bdi>
+                  {nameAt(d.keys) && <bdi className="small">{nameAt(d.keys)}</bdi>}
                   <span className="small muted">
                     {sideName(d.side)} · {tn('games.them.row', d.games.length, { san: d.played.san, expected: d.expected.join(', ') })}
                   </span>
@@ -375,6 +383,8 @@ export function GamesView({
           </div>
         </section>
       )}
+
+      {openings && games.length > 0 && <OpeningsPanel games={games} table={openings} />}
 
       {og.games.length > 0 && <DiscoverPanel games={og.games} onImport={onImport} />}
     </div>
@@ -462,6 +472,59 @@ function DiscoverPanel({
         <p className="small" aria-live="polite" style={{ margin: 0 }}>
           {status}
         </p>
+      )}
+    </section>
+  );
+}
+
+/** Your games by the opening they reached (its family name) and the side you played. */
+function OpeningsPanel({ games, table }: { games: readonly OpeningGame[]; table: OpeningTable }) {
+  const [all, setAll] = useState(false);
+  const rows = useMemo(
+    () =>
+      openingResults(games, (keys) => {
+        const o = openingOf(table, keys);
+        return o ? { eco: o.eco, name: family(o.name) } : null;
+      }),
+    [games, table],
+  );
+  if (!rows.length) return null;
+  const shown = all ? rows : rows.slice(0, 10);
+  return (
+    <section className="panel" aria-labelledby="games-openings">
+      <h2 id="games-openings">{t('games.openings')}</h2>
+      <div className="table-scroll">
+        <table className="games-table">
+          <thead>
+            <tr>
+              <th>{t('games.opening')}</th>
+              <th>{t('train.side')}</th>
+              <th>{t('games.games')}</th>
+              <th>{t('games.score')}</th>
+              <th dir="ltr">+ = −</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => (
+              <tr key={`${r.side}|${r.name}`}>
+                <td>
+                  <bdi>{r.name}</bdi>
+                </td>
+                <td>{sideName(r.side)}</td>
+                <td>{r.games}</td>
+                <td>{pct((r.wins + r.draws / 2) / r.games)}</td>
+                <td dir="ltr">
+                  +{r.wins} ={r.draws} −{r.losses}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > shown.length && (
+        <button type="button" className="link small" onClick={() => setAll(true)}>
+          {t('games.showAll', { n: rows.length })}
+        </button>
       )}
     </section>
   );

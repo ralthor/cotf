@@ -280,3 +280,20 @@ Plan: `OPENING_TRAINER_PHASE4.md`.
   in the current language.
 - Adding an opponent's move to a chapter from this screen needs a chapter editor; for now *Prepare*
   opens the position on Lichess.
+
+## Opening names and explorer (phase 5, 20 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE5.md`.
+
+- **Names come from lichess-org/chess-openings (CC0)**, kept as source TSV in `web/data/` and turned
+  into a position-key table by a script, not at runtime: no parsing of 3,865 lines in the browser.
+  The table is a separate chunk (about 60 kB compressed), loaded on first use.
+- **Last named position wins**: a line is named by its deepest named position, so names survive past
+  the dataset's depth and through transpositions.
+- **The trainer names the position from moves already played**, the same no-spoiler rule as the line
+  name; a chapter's own `[Opening]` header still comes first.
+- **Explorer: masters is open, the Lichess database needs a token** (checked: 200 vs 401). The token is
+  the user's own, typed by them, kept in localStorage and sent only to the explorer. The panel is
+  folded by default and fetches after a 250 ms pause with a session cache.
+- **"Your openings" groups by family** (the name before the colon): variation names split games too
+  finely to show a score.

@@ -1,7 +1,7 @@
 # Opening trainer: requirements review and approach
 
-Status: phases 1 to 4 implemented, 20 Nov 2026: [phase 1](OPENING_TRAINER_PHASE1.md), [phase 2](OPENING_TRAINER_PHASE2.md),
-[phase 3](OPENING_TRAINER_PHASE3.md), [phase 4](OPENING_TRAINER_PHASE4.md).
+Status: phases 1 to 5 implemented, 20 Nov 2026: [phase 1](OPENING_TRAINER_PHASE1.md), [phase 2](OPENING_TRAINER_PHASE2.md),
+[phase 3](OPENING_TRAINER_PHASE3.md), [phase 4](OPENING_TRAINER_PHASE4.md), [phase 5](OPENING_TRAINER_PHASE5.md).
 The original requirements are copied at the end of this file.
 
 ## Summary
@@ -136,6 +136,7 @@ Progressive, each step costing grade: the piece to move, then its square, then a
 4. **Games and repertoire**: deviations, exercises from real games, discovery.
    → [phase 4 plan](OPENING_TRAINER_PHASE4.md)
 5. **Opening names and ECO codes**; optional explorer statistics with a Lichess token.
+   → [phase 5 plan](OPENING_TRAINER_PHASE5.md)
 6. **PWA and offline use.**
 7. **Curated explanations, traps and reasoning questions.**
 

@@ -189,3 +189,16 @@ export function positionLabel(g: TrainGraph, pos: PosKey): string {
   }
   return '';
 }
+
+/** Position keys from a chapter's start to `pos`, along the first move that leads there. */
+export function pathTo(g: TrainGraph, pos: PosKey): PosKey[] {
+  if (g.starts.includes(pos)) return [pos];
+  for (const list of g.from.values()) {
+    for (const m of list) {
+      if (m.to !== pos) continue;
+      const at = moveNode(g, m);
+      if (at) return nodesOnPath(at.chapter.root, at.path).map((n) => n.posKey);
+    }
+  }
+  return [pos];
+}

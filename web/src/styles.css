@@ -488,3 +488,12 @@ label.file-button:focus-within { outline: 2px solid var(--accent); outline-offse
 .games-table th, .games-table td { text-align: start; padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .games-table td:not(:first-child), .games-table th:not(:first-child) { white-space: nowrap; }
 .table-scroll { overflow-x: auto; }
+
+/* Openings: explorer */
+.explorer-table td { vertical-align: middle; }
+.explorer-table tr.in-rep td:first-child { font-weight: 600; }
+.result-bar { display: flex; height: 18px; border-radius: 4px; overflow: hidden; font-size: 11px; line-height: 18px; border: 1px solid var(--border); }
+.result-bar span { display: block; text-align: center; overflow: hidden; white-space: nowrap; }
+.rb-w { background: #f4f4f4; color: #222; }
+.rb-d { background: #9a9a9a; color: #111; }
+.rb-b { background: #2a2a2a; color: #eee; }

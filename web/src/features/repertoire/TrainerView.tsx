@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Chessboard, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
 import { displayComments } from '../../core/repertoire/parse';
-import { hintFor, lineName, positionLabel } from '../../core/repertoire/trainer';
+import { openingOf } from '../../core/openings/names';
+import { hintFor, lineName, pathTo, positionLabel } from '../../core/repertoire/trainer';
 import type { Chapter, Repertoire, ShapeColor, Side, TrainMode } from '../../core/repertoire/types';
 import { getLocale, t, tn } from '../../i18n';
 import { useT } from '../../i18n/react';
 import { getPref, setPref } from '../../storage/prefs';
 import { legalMove } from '../explore/grade';
+import { useOpenings } from './useOpenings';
 import { accepted, useTrainer, type Mistake, type Note, type Session } from './useTrainer';
 
 const SHAPE: Record<ShapeColor, string> = {
@@ -273,6 +275,11 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
   const names = lineChapters.map(lineName);
   const shared = names.length > 1 && names.every((n) => n.opening && n.opening === names[0]!.opening) ? names[0]!.opening : null;
   const single = names.length === 1 ? names[0]! : null;
+  // The opening of the position on the board, from the moves played so far (never the next one).
+  const openings = useOpenings();
+  const played = s.stage === 'replay' ? s.line.slice(0, s.replayIndex) : s.line;
+  const keys = s.mode === 'review' ? pathTo(tr.graph, s.pos) : [s.lineStart, ...played.map((m) => m.to)];
+  const eco = openings && s.pos ? openingOf(openings, keys) : null;
   const total = s.mode === 'review' ? s.queue.length : 0;
 
   return (
@@ -292,18 +299,18 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
           {single ? (
             <>
               <bdi>{single.title}</bdi>
-              {single.opening && (
+              {(single.opening ?? eco?.name) && (
                 <span className="muted">
                   {' · '}
-                  <bdi>{single.opening}</bdi>
+                  <bdi>{single.opening ?? eco?.name}</bdi>
                 </span>
               )}
             </>
           ) : (
             <>
-              {shared && (
+              {(shared ?? eco?.name) && (
                 <>
-                  <bdi>{shared}</bdi>
+                  <bdi>{shared ?? eco?.name}</bdi>
                   {' · '}
                 </>
               )}

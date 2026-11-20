@@ -112,3 +112,21 @@ describe('discovery', () => {
     expect(discoverRepertoire([game('1', 'Me', 'A', '1. e4')], { side: 'w', comment: () => '', title: 'x' })).toBeNull();
   });
 });
+
+describe('openings in your games', () => {
+  it('groups games by the opening they reached', async () => {
+    const { loadOpenings, openingOf, family } = await import('../openings/names');
+    const t = await loadOpenings();
+    const games = [
+      game('1', 'Me', 'A', '1. e4 c6 2. d4 d5 3. e5 Bf5'),
+      game('2', 'Me', 'B', '1. e4 c6 2. d4 d5 3. e5 c5', '0-1'),
+      game('3', 'X', 'Me', '1. d4 d5 2. c4 e6 3. Nc3', '1/2-1/2'),
+    ];
+    const rows = (await import('./games')).openingResults(games, (keys) => {
+      const o = openingOf(t, keys);
+      return o ? { eco: o.eco, name: family(o.name) } : null;
+    });
+    expect(rows[0]).toMatchObject({ name: 'Caro-Kann Defense', side: 'w', games: 2, wins: 1, losses: 1 });
+    expect(rows[1]).toMatchObject({ name: "Queen's Gambit Declined", side: 'b', games: 1, draws: 1 });
+  });
+});

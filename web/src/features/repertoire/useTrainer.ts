@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { questionFor, type Question } from '../../core/repertoire/questions';
 import { isDue, review, type AnswerResult } from '../../core/repertoire/srs';
+import { findTraps } from '../../core/repertoire/traps';
 import {
   ahead,
   answerResult,
@@ -24,6 +26,11 @@ export const LEARN_BATCH = 6;
 export const REVIEW_BATCH = 20;
 /** Pause before the opponent's move (ms). */
 const OPPONENT_DELAY = 550;
+/** Reasoning questions asked at most per line (Learn and Memorise), so lines keep their pace. */
+export const QUESTIONS_PER_LINE = 2;
+
+/** Modes that ask single positions rather than walking lines. */
+export const isSingle = (mode: TrainMode) => mode === 'review' || mode === 'traps';
 
 /** A move's place in a chapter, for its comments and arrows. */
 export type Note = { node: RepNode; parent: RepNode; mine: boolean };
@@ -52,7 +59,7 @@ export type Ask = {
   notice: { kind: 'wrong' | 'other'; san: string } | null;
 };
 
-export type Phase = 'ask' | 'opponent' | 'feedback' | 'lineEnd' | 'done';
+export type Phase = 'ask' | 'question' | 'opponent' | 'feedback' | 'lineEnd' | 'done';
 
 export type Session = {
   mode: TrainMode;
@@ -83,6 +90,11 @@ export type Session = {
   /** Results of graded answers this session, and of the current line. */
   results: AnswerResult[];
   lineResults: AnswerResult[];
+  /** A question about the move just played, and the answer given (null until answered). */
+  question: Question | null;
+  questionAnswer: { value: string; right: boolean } | null;
+  /** Questions asked in the current line. */
+  lineQuestions: number;
 };
 
 type Ctx = { g: TrainGraph; cards: ReadonlyMap<PosKey, TrainCard> };
@@ -121,6 +133,7 @@ function startLine(s: Session, ctx: Ctx, start: PosKey): Session {
     replayIndex: 0,
     introduced: [],
     lineResults: [],
+    lineQuestions: 0,
     chapters: ctx.g.chapters.filter((c) => c.root.posKey === start).map((c) => c.id),
     stage: s.mode === 'learn' ? 'intro' : 'walk',
   };
@@ -169,7 +182,7 @@ function play(s: Session, ctx: Ctx, m: RepMove): Session {
   const notes = note ? [...s.notes, note].slice(-2) : s.notes.slice(-1);
   const next: Session = { ...s, pos: m.to, fen: note?.node.fen ?? fenOf(ctx.g, m.to), lastUci: m.uci, notes, chapters, pending: null };
   if (s.stage === 'replay') return { ...next, replayIndex: s.replayIndex + 1 };
-  if (s.mode === 'review') return next;
+  if (isSingle(s.mode)) return next;
   return { ...next, line: [...s.line, m] };
 }
 
@@ -181,7 +194,8 @@ export type Mistake = { posKey: PosKey; times: number; lastAt: string; wrong: st
  * Training state for one repertoire and side: FSRS cards and the answer log from IndexedDB, and
  * the running session (Learn, Memorise or Review).
  */
-export function useTrainer(repertoireId: string | null, chapters: readonly Chapter[], side: Side) {
+export function useTrainer(repertoireId: string | null, chapters: readonly Chapter[], side: Side, opts: { questions?: boolean } = {}) {
+  const askQuestions = opts.questions ?? true;
   const g = useMemo(() => buildTrainGraph(chapters, side), [chapters, side]);
   const [data, setData] = useState<{ key: string; cards: Map<PosKey, TrainCard>; log: TrainLogEntry[] } | null>(null);
   const key = `${repertoireId}|${side}`;
@@ -278,11 +292,16 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
         queueIndex: 0,
         results: [],
         lineResults: [],
+        question: null,
+        questionAnswer: null,
+        lineQuestions: 0,
       };
-      if (mode === 'review') {
+      if (isSingle(mode)) {
         const queue = only
           ? [only]
-          : [...new Set([...mistakes.map((m) => m.posKey), ...ctx.g.cards.filter((k) => (ctx.cards.get(k)?.srs.lapses ?? 0) > 0)])].slice(0, REVIEW_BATCH);
+          : mode === 'traps'
+            ? findTraps(ctx.g).map((t) => t.posKey).slice(0, REVIEW_BATCH)
+            : [...new Set([...mistakes.map((m) => m.posKey), ...ctx.g.cards.filter((k) => (ctx.cards.get(k)?.srs.lapses ?? 0) > 0)])].slice(0, REVIEW_BATCH);
         const pos = queue[0];
         if (!pos) return setSession(base);
         setSession({ ...base, queue, pos, fen: fenOf(ctx.g, pos), chapters: positionChapters(ctx.g, pos), phase: 'ask', ask: newAsk(pos, myMoves(ctx.g, pos), null, false, true) });
@@ -300,7 +319,7 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
     setSession((s) => {
       if (!s) return s;
       const ctx = ctxRef.current;
-      if (s.mode === 'review') {
+      if (isSingle(s.mode)) {
         const i = s.queueIndex + 1;
         const pos = s.queue[i];
         if (!pos) return { ...s, phase: 'done', ask: null };
@@ -374,13 +393,58 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
       } else {
         nextS = { ...nextS, introduced: [...s.introduced, ask.pos] };
       }
-      if (s.mode === 'review') nextS = { ...nextS, phase: 'feedback', ask: null };
+      // A question about the move just played, from its comment or arrows (not while it is shown).
+      const note = nextS.notes[nextS.notes.length - 1];
+      const q =
+        askQuestions && !ask.intro && note?.mine && (isSingle(s.mode) || s.lineQuestions < QUESTIONS_PER_LINE)
+          ? questionFor(note.node, note.parent.fen, move.uci)
+          : null;
+      if (q) nextS = { ...nextS, phase: 'question', ask: null, question: q, questionAnswer: null, lineQuestions: s.lineQuestions + 1 };
+      else if (isSingle(s.mode)) nextS = { ...nextS, phase: 'feedback', ask: null };
       else nextS = advance({ ...nextS, ask: null }, ctx);
       setSession(nextS);
       return true;
     },
-    [session, record],
+    [session, record, askQuestions],
   );
 
-  return { graph: g, loaded: !!loaded || !repertoireId, cards, log, counts, mistakes, session, start, next, stop, hint, show, answer };
+  /** An answer to the question: a square (plan), a choice (blank) or "shown" (author's question). */
+  const answerQuestion = useCallback((value: string) => {
+    setSession((s) => {
+      const q = s?.question;
+      if (!s || s.phase !== 'question' || !q || s.questionAnswer) return s;
+      const right = q.kind === 'plan' ? q.squares.includes(value) : q.kind === 'blank' ? value === q.answer : true;
+      return { ...s, questionAnswer: { value, right } };
+    });
+  }, []);
+
+  /** Leaves the question and goes on with the line (or to the position's feedback). */
+  const continueAfterQuestion = useCallback(() => {
+    setSession((s) => {
+      if (!s || s.phase !== 'question') return s;
+      const cleared = { ...s, question: null, questionAnswer: null };
+      return isSingle(s.mode) ? { ...cleared, phase: 'feedback' } : advance(cleared, ctxRef.current);
+    });
+  }, []);
+
+  const traps = useMemo(() => findTraps(g), [g]);
+
+  return {
+    graph: g,
+    loaded: !!loaded || !repertoireId,
+    cards,
+    log,
+    counts,
+    mistakes,
+    traps,
+    session,
+    start,
+    next,
+    stop,
+    hint,
+    show,
+    answer,
+    answerQuestion,
+    continueAfterQuestion,
+  };
 }

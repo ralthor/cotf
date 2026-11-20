@@ -2,14 +2,17 @@ import { useMemo, useState } from 'react';
 import { Chessboard, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
 import { displayComments } from '../../core/repertoire/parse';
 import { openingOf } from '../../core/openings/names';
+import type { Question } from '../../core/repertoire/questions';
 import { hintFor, lineName, pathTo, positionLabel } from '../../core/repertoire/trainer';
+import type { Trap } from '../../core/repertoire/traps';
+import { nagGlyph } from '../../core/repertoire/nags';
 import type { Chapter, Repertoire, ShapeColor, Side, TrainMode } from '../../core/repertoire/types';
 import { getLocale, t, tn } from '../../i18n';
 import { useT } from '../../i18n/react';
 import { getPref, setPref } from '../../storage/prefs';
 import { legalMove } from '../explore/grade';
 import { useOpenings } from './useOpenings';
-import { accepted, useTrainer, type Mistake, type Note, type Session } from './useTrainer';
+import { accepted, isSingle, useTrainer, type Mistake, type Note, type Session } from './useTrainer';
 
 const SHAPE: Record<ShapeColor, string> = {
   green: 'rgba(21,120,27,0.8)',
@@ -62,7 +65,13 @@ export function TrainerView({ repertoire, chapters }: { repertoire: Repertoire |
     setPref('trainNoHints', v ? '1' : null);
   };
 
-  const tr = useTrainer(repertoire?.id ?? null, inScope, side);
+  const [questions, setQuestionsState] = useState(() => getPref('trainQuestions') !== '0');
+  const setQuestions = (v: boolean) => {
+    setQuestionsState(v);
+    setPref('trainQuestions', v ? null : '0');
+  };
+
+  const tr = useTrainer(repertoire?.id ?? null, inScope, side, { questions });
   const { session, counts } = tr;
 
   if (!repertoire) return <div className="panel">{t('repertoire.intro')}</div>;
@@ -74,6 +83,7 @@ export function TrainerView({ repertoire, chapters }: { repertoire: Repertoire |
     { mode: 'learn', n: counts.fresh, label: tn('train.learnCount', counts.fresh) },
     { mode: 'memorise', n: counts.due, label: tn('train.dueCount', counts.due) },
     { mode: 'review', n: Math.max(counts.weak, tr.mistakes.length), label: tn('train.weakCount', Math.max(counts.weak, tr.mistakes.length)) },
+    { mode: 'traps', n: tr.traps.length, label: tn('train.trapsCount', tr.traps.length) },
   ];
 
   return (
@@ -105,6 +115,10 @@ export function TrainerView({ repertoire, chapters }: { repertoire: Repertoire |
             <input type="checkbox" checked={noHints} onChange={(e) => setNoHints(e.target.checked)} />
             {t('train.noHints')}
           </label>
+          <label className="row small" title={t('train.questionsHelp')}>
+            <input type="checkbox" checked={questions} onChange={(e) => setQuestions(e.target.checked)} />
+            {t('train.questions')}
+          </label>
         </div>
         {counts.cards === 0 ? (
           <p className="muted">{t('train.noCards', { side: sideName })}</p>
@@ -125,6 +139,7 @@ export function TrainerView({ repertoire, chapters }: { repertoire: Repertoire |
         </p>
       </section>
       <MistakeList mistakes={tr.mistakes} label={(k) => positionLabel(tr.graph, k)} onPractise={(k) => tr.start('review', k)} onPractiseAll={() => tr.start('review')} />
+      {tr.traps.length > 0 && <TrapList traps={tr.traps} onPractise={(k) => tr.start('traps', k)} />}
     </div>
   );
 }
@@ -190,7 +205,13 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
   const selected = asking && picked?.fen === s.fen ? picked.square : null;
   // While you are asked (outside Learn's shown moves), the opponent's comments could give the answer away.
   const hideLatest = asking && !ask.intro;
-  const notes = hideLatest ? s.notes.filter((n, i) => !(i === s.notes.length - 1 && !n.mine)) : s.notes;
+  // While a question about your move is open, its comment and arrows would give the answer away.
+  const questionOpen = s.phase === 'question' && !s.questionAnswer;
+  const notes = hideLatest
+    ? s.notes.filter((n, i) => !(i === s.notes.length - 1 && !n.mine))
+    : questionOpen
+      ? s.notes.filter((n, i) => !(i === s.notes.length - 1 && n.mine))
+      : s.notes;
   const latest = notes[notes.length - 1];
 
   const arrows = useMemo(() => {
@@ -215,8 +236,10 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
     }
     if (ask && ask.hint > 0 && ask.hint < 3) for (const sq of hintFor(accepted(ask), ask.hint).squares) out[sq] = { ...out[sq], background: HINT };
     if (selected) out[selected] = { ...out[selected], background: SELECTED };
+    const qa = s.question?.kind === 'plan' ? s.questionAnswer : null;
+    if (qa) out[qa.value] = { ...out[qa.value], background: qa.right ? 'rgba(21,120,27,0.45)' : 'rgba(136,32,32,0.45)' };
     return out;
-  }, [s.lastUci, s.notes, latest, ask, selected]);
+  }, [s.lastUci, s.notes, latest, ask, selected, s.question, s.questionAnswer]);
 
   const onPieceDrop = ({ sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
     if (!asking || !targetSquare || sourceSquare === targetSquare) return false;
@@ -225,6 +248,7 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
     return m ? tr.answer(m.uci, m.san) : false;
   };
   const onSquareClick = ({ square, piece }: SquareHandlerArgs) => {
+    if (questionOpen && s.question?.kind === 'plan') return tr.answerQuestion(square);
     if (!asking) return;
     if (piece && piece.pieceType[0] === side) return setPicked(square === selected ? null : { fen: s.fen, square });
     if (!selected) return;
@@ -245,6 +269,8 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
   } else if (s.phase === 'feedback') {
     const last = s.results[s.results.length - 1];
     prompt = <p className={`practice-msg ${last === 'good' ? 'success' : ''}`}>{last === 'good' ? t('train.correct') : t('train.correctAfter')}</p>;
+  } else if (s.phase === 'question' && s.question) {
+    prompt = <QuestionPrompt q={s.question} answer={s.questionAnswer} onAnswer={tr.answerQuestion} />;
   } else if (s.phase === 'opponent') {
     prompt = <p className="practice-msg muted">{t('train.opponent')}</p>;
   } else if (ask) {
@@ -278,9 +304,9 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
   // The opening of the position on the board, from the moves played so far (never the next one).
   const openings = useOpenings();
   const played = s.stage === 'replay' ? s.line.slice(0, s.replayIndex) : s.line;
-  const keys = s.mode === 'review' ? pathTo(tr.graph, s.pos) : [s.lineStart, ...played.map((m) => m.to)];
+  const keys = isSingle(s.mode) ? pathTo(tr.graph, s.pos) : [s.lineStart, ...played.map((m) => m.to)];
   const eco = openings && s.pos ? openingOf(openings, keys) : null;
-  const total = s.mode === 'review' ? s.queue.length : 0;
+  const total = isSingle(s.mode) ? s.queue.length : 0;
 
   return (
     <div className="stack">
@@ -356,9 +382,14 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
                   {t('train.show')}
                 </button>
               )}
+              {s.phase === 'question' && (
+                <button type="button" className={s.questionAnswer ? 'primary' : undefined} onClick={tr.continueAfterQuestion}>
+                  {s.questionAnswer ? t('train.q.continue') : t('train.q.skip')}
+                </button>
+              )}
               {(s.phase === 'lineEnd' || s.phase === 'feedback') && (
                 <button type="button" className="primary" onClick={tr.next}>
-                  {s.mode === 'review' ? (s.queueIndex + 1 < s.queue.length ? t('train.nextPosition') : t('train.finish')) : t('train.nextLine')}
+                  {isSingle(s.mode) ? (s.queueIndex + 1 < s.queue.length ? t('train.nextPosition') : t('train.finish')) : t('train.nextLine')}
                 </button>
               )}
               {s.phase === 'done' && (
@@ -392,5 +423,100 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
         </div>
       </div>
     </div>
+  );
+}
+
+/** The question about the move just played, and the verdict once answered. */
+function QuestionPrompt({ q, answer, onAnswer }: { q: Question; answer: Session['questionAnswer']; onAnswer: (value: string) => void }) {
+  if (q.kind === 'plan') {
+    return (
+      <>
+        <p className="practice-msg">{t('train.q.plan')}</p>
+        {answer && (
+          <p className={`practice-msg ${answer.right ? 'success' : 'fail'}`}>
+            {answer.right ? t('train.q.right') : t('train.q.planWrong', { squares: q.squares.join(', ') })}
+          </p>
+        )}
+      </>
+    );
+  }
+  if (q.kind === 'author') {
+    return (
+      <>
+        <p className="practice-msg" dir="auto">
+          {q.question}
+        </p>
+        {answer ? (
+          <p dir="auto" style={{ margin: 0 }}>
+            {q.answer}
+          </p>
+        ) : (
+          <div className="row">
+            <button type="button" onClick={() => onAnswer('shown')}>
+              {t('train.q.showAnswer')}
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+  return (
+    <>
+      <p className="small muted" style={{ margin: 0 }}>
+        {t('train.q.blank')}
+      </p>
+      <p className="question-text" dir="auto">
+        {answer ? q.text.replace('____', q.answer) : q.text}
+      </p>
+      <div className="row" dir="ltr">
+        {q.choices.map((c) => (
+          <button
+            key={c}
+            type="button"
+            disabled={!!answer}
+            className={answer && c === q.answer ? 'choice-right' : answer && c === answer.value ? 'choice-wrong' : undefined}
+            onClick={() => onAnswer(c)}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+      {answer && <p className={`practice-msg ${answer.right ? 'success' : 'fail'}`}>{answer.right ? t('train.q.right') : t('train.q.wrong', { answer: q.answer })}</p>}
+    </>
+  );
+}
+
+/** Opponent mistakes the study marks (?, ??, ?!) and your repertoire's answer to each. */
+function TrapList({ traps, onPractise }: { traps: Trap[]; onPractise: (posKey: string) => void }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? traps : traps.slice(0, 8);
+  return (
+    <section className="panel" aria-labelledby="traps-title">
+      <h2 id="traps-title">{t('train.traps.title')}</h2>
+      <p className="small muted">{t('train.traps.help')}</p>
+      <ul className="mistake-list">
+        {shown.map((tr) => (
+          <li key={tr.posKey}>
+            <div className="stack" style={{ gap: 2, flex: 1, minWidth: 0 }}>
+              <bdi dir="ltr" className="mistake-line">
+                {tr.line}
+                {nagGlyph(tr.nag) ?? ''}
+              </bdi>
+              <span className="small muted">
+                {t('train.traps.row', { mistake: `${tr.mistake.san}${nagGlyph(tr.nag) ?? ''}`, reply: tr.replies.map((m) => m.san).join(', ') })}
+              </span>
+            </div>
+            <button type="button" className="small" onClick={() => onPractise(tr.posKey)}>
+              {t('train.practise')}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {traps.length > shown.length && (
+        <button type="button" className="link small" onClick={() => setAll(true)}>
+          {t('games.showAll', { n: traps.length })}
+        </button>
+      )}
+    </section>
   );
 }

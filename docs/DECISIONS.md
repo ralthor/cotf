@@ -311,3 +311,17 @@ Plan: `OPENING_TRAINER_PHASE6.md`.
   with 4×4 supersampling and a tiny PNG writer, so no image library or tool is needed and they can be
   rebuilt. Checked against the browser's rendering of `favicon.svg`.
 - **Relative `start_url` and `scope`**, so the same build works at the root and under a sub-path.
+
+## Traps and reasoning questions (phase 7, 20 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE7.md`.
+
+- **No outside explanation text.** No free dataset is both well licensed and good enough; the study's
+  own comments, arrows and move symbols are the explanations, and questions and traps are built from
+  them.
+- **Traps = opponent moves marked `?`, `??` or `?!` with an answer in the repertoire**, found by
+  position. Practised as single positions and scheduled like Review.
+- **Questions are content-based** (author `Q: … A:`, plan squares from arrows, a blanked move or square
+  from the comment), deterministic per position, and never graded for spaced repetition.
+- **At most two questions per line** in Learn and Memorise; the move's comment and arrows are hidden
+  until the question is answered, since they hold the answer.

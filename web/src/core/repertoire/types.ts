@@ -82,8 +82,11 @@ export type RepMove = {
   refs: { chapterId: string; path: number[] }[];
 };
 
-/** `game`: a mistake found in one of your games (phase 4), not a training answer. */
-export type TrainMode = 'learn' | 'memorise' | 'review' | 'game';
+/**
+ * `traps`: positions after an opponent's mistake marked in the study. `game`: a mistake found in one
+ * of your games (phase 4), not a training answer.
+ */
+export type TrainMode = 'learn' | 'memorise' | 'review' | 'traps' | 'game';
 
 /** Spaced-repetition state of one card: a position where it is `side`'s move. */
 export type TrainCard = {

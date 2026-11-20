@@ -50,6 +50,9 @@ square.
 - **Review**: positions you got wrong, one at a time.
 - Hints step by step (piece, square, arrow), or *Show move*. *No hints* turns them off.
 - **Mistakes** lists the positions you got wrong and what you played, with a button to practise each.
+- **Traps**: opponent moves your studies mark with `?`, `??` or `?!`, and your answer, to practise.
+- **Questions about plans** after a right move, from the study itself: a question the author wrote
+  as `Q: … A: …`, "where is the plan aimed?" from the move's arrows, or a move left out of the comment.
 
 **Progress** (the third sub-tab) shows, per repertoire and side: positions learnt and mastered, what
 is due, first-time accuracy and its change, answers per day for the last 30 days, streaks and

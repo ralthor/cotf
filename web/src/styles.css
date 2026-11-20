@@ -497,3 +497,8 @@ label.file-button:focus-within { outline: 2px solid var(--accent); outline-offse
 .rb-w { background: #f4f4f4; color: #222; }
 .rb-d { background: #9a9a9a; color: #111; }
 .rb-b { background: #2a2a2a; color: #eee; }
+
+/* Openings: questions */
+.question-text { margin: 0; font-size: 15px; white-space: pre-line; }
+button.choice-right { border-color: var(--cat-best); background: color-mix(in srgb, var(--cat-best) 18%, var(--surface)); font-weight: 600; }
+button.choice-wrong { border-color: var(--cat-mistake); background: color-mix(in srgb, var(--cat-mistake) 15%, var(--surface)); }

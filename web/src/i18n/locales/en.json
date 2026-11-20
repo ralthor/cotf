@@ -696,5 +696,22 @@
   "pwa.reload": "Reload",
   "pwa.offline": "Ready to work offline.",
   "pwa.install": "Install",
-  "pwa.installHelp": "Install Chess on the Fly as an app on this device. It then works offline too."
+  "pwa.installHelp": "Install Chess on the Fly as an app on this device. It then works offline too.",
+  "train.traps": "Traps",
+  "train.trapsHelp": "Opponent mistakes marked in your studies: find the punishing move.",
+  "train.trapsCount.one": "{n} trap",
+  "train.trapsCount.other": "{n} traps",
+  "train.traps.title": "Traps in your repertoire",
+  "train.traps.help": "Opponent moves your studies mark with ?, ?? or ?!, and your repertoire's answer.",
+  "train.traps.row": "If they play {mistake}, you play {reply}.",
+  "train.questions": "Questions about plans",
+  "train.questionsHelp": "After a right move, sometimes ask about the idea behind it, from the study's comments and arrows.",
+  "train.q.plan": "Where is this move's plan aimed? Click the square on the board.",
+  "train.q.planWrong": "Not quite: the study points at {squares}.",
+  "train.q.right": "Right!",
+  "train.q.blank": "Fill in the gap in the study's comment:",
+  "train.q.wrong": "Not quite: it was {answer}.",
+  "train.q.showAnswer": "Show the answer",
+  "train.q.continue": "Continue",
+  "train.q.skip": "Skip question"
 }

@@ -226,8 +226,18 @@ export function useRepertoires() {
     [reloadList, setChapters],
   );
 
+  /** Reads everything again (after a restore). */
+  const reloadAll = useCallback(async () => {
+    const list = await repertoireStore.list();
+    setRepertoires(list);
+    const id = selectedId && list.some((r) => r.id === selectedId) ? selectedId : (list[0]?.id ?? null);
+    select(id);
+    if (id) setChapters(id, await repertoireStore.chapters(id));
+  }, [selectedId, select, setChapters]);
+
   return {
     loaded,
+    reloadAll,
     repertoires,
     selected: repertoires.find((r) => r.id === selectedId) ?? null,
     select,

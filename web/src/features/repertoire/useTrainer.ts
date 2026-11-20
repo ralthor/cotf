@@ -371,5 +371,5 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
     [session, record],
   );
 
-  return { graph: g, loaded: !!loaded || !repertoireId, counts, mistakes, session, start, next, stop, hint, show, answer };
+  return { graph: g, loaded: !!loaded || !repertoireId, cards, log, counts, mistakes, session, start, next, stop, hint, show, answer };
 }

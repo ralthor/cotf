@@ -6,8 +6,12 @@ import { getPref, setPref } from '../../storage/prefs';
 import { ChapterView } from './ChapterView';
 import { RepertoireImport } from './RepertoireImport';
 import { RepertoireList } from './RepertoireList';
+import { BackupPanel } from './BackupPanel';
+import { ProgressView } from './ProgressView';
 import { TrainerView } from './TrainerView';
 import { useRepertoires } from './useRepertoires';
+
+type View = 'browse' | 'train' | 'progress';
 
 /** The Openings tab: repertoires and their chapters on the left, the open chapter on the right. */
 export function OpeningsView() {
@@ -18,8 +22,13 @@ export function OpeningsView() {
     setChapterIdState(id);
     setPref('openChapter', id);
   };
-  const [view, setViewState] = useState<'browse' | 'train'>(() => (getPref('openingsView') === 'train' ? 'train' : 'browse'));
-  const setView = (v: 'browse' | 'train') => {
+  const [view, setViewState] = useState<View>(() => {
+    const saved = getPref('openingsView');
+    return saved === 'train' || saved === 'progress' ? saved : 'browse';
+  });
+  // Bumped after a restore, so the training views read their data again.
+  const [dataVersion, setDataVersion] = useState(0);
+  const setView = (v: View) => {
     setViewState(v);
     setPref('openingsView', v);
   };
@@ -72,12 +81,20 @@ export function OpeningsView() {
           onSaveChapters={reps.saveChapters}
           onRefresh={(id) => reps.refreshStudies(id)}
         />
+        {reps.repertoires.length > 0 && (
+          <BackupPanel
+            onRestored={() => {
+              void reps.reloadAll();
+              setDataVersion((v) => v + 1);
+            }}
+          />
+        )}
         <RepertoireImport repertoires={reps.repertoires} selectedId={reps.selected?.id ?? null} onImport={reps.importPgn} />
       </div>
       <div className="game-col" ref={chapterCol}>
         {reps.repertoires.length > 0 && (
           <div className="tabs openings-tabs" role="tablist" aria-label={t('nav.openings')}>
-            {(['browse', 'train'] as const).map((v) => (
+            {(['browse', 'train', 'progress'] as const).map((v) => (
               <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}>
                 {t(`openings.${v}`)}
               </button>
@@ -85,7 +102,9 @@ export function OpeningsView() {
           </div>
         )}
         {view === 'train' && reps.repertoires.length > 0 ? (
-          <TrainerView repertoire={reps.selected} chapters={reps.chapters} />
+          <TrainerView key={dataVersion} repertoire={reps.selected} chapters={reps.chapters} />
+        ) : view === 'progress' && reps.repertoires.length > 0 ? (
+          <ProgressView key={dataVersion} repertoire={reps.selected} chapters={reps.chapters} />
         ) : chapter ? (
           <ChapterView key={`${chapter.id}|${chapter.importedAt}`} chapter={chapter} />
         ) : (

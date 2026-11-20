@@ -235,3 +235,25 @@ Plan: `OPENING_TRAINER_PHASE2.md`.
 - **IndexedDB version 3** adds `trainCards` and `trainLog`; deleting a repertoire deletes both.
 - Moves outside the repertoire are wrong answers for now. Engine grading ("playable deviation")
   waits for phase 4, where real games need it too.
+
+## Opening progress and backups (phase 3, 20 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE3.md`.
+
+- **Statistics are computed, not stored**: `computeStats` runs over the cards and the answer log on
+  every view, so nothing can drift and later phases can add measures without migrations.
+- **Mastered = FSRS stability of at least 21 days**: the model's own estimate of memory, not a count
+  of right answers.
+- **Days are local calendar days**; a streak still counts if the last training day was yesterday.
+- **The daily chart is plain HTML** (one bar per day, details on hover or focus, a hidden table for
+  screen readers); no chart library for one bar series.
+- **Backup format** `chess-on-the-fly/openings` version 1: repertoires, chapters, training cards
+  and answers. Card dates are ISO strings in the file and dates again after restore (ts-fsrs refuses
+  string dates). The move graph is not in the file; it is rebuilt from the chapters.
+- **Restore merges**: repertoires in the file replace those with the same id, others stay; cards in
+  the file win; answers are added unless the same (repertoire, side, position, time) is already
+  logged, so restoring twice changes nothing. One transaction, after a confirmation.
+- **Games and analyses are not in the backup** for now: they come from Chess.com or Lichess again,
+  and analyses are a cache.
+- **Reminder**: shown when there are training cards and the last downloaded backup is older than 7
+  days (or there is none). The date of the last download is a localStorage preference.

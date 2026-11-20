@@ -35,7 +35,7 @@ function relative(date: Date): string {
   return rtf.format(Math.round(s / 86400), 'day');
 }
 
-function initialSide(chapters: readonly Chapter[]): Side {
+export function initialSide(chapters: readonly Chapter[]): Side {
   const saved = getPref('trainSide');
   const sides = new Set(chapters.map((c) => c.side));
   if ((saved === 'w' || saved === 'b') && sides.has(saved)) return saved;
@@ -179,7 +179,7 @@ function MistakeList({
   );
 }
 
-function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnType<typeof useTrainer>; session: Session; side: Side; noHints: boolean }) {
+export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnType<typeof useTrainer>; session: Session; side: Side; noHints: boolean }) {
   const ask = s.ask;
   const asking = s.phase === 'ask' && !!ask;
   // Click-to-move: the square picked first (forgotten when the position changes).

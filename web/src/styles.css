@@ -462,3 +462,20 @@ button.busy:disabled { opacity: 1; cursor: progress; color: var(--muted); border
 .mistake-list li { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .mistake-list li:first-child { border-top: 0; padding-top: 0; }
 .mistake-line { font-size: 14px; overflow-wrap: anywhere; }
+
+/* Openings: progress and backup */
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.stat-tile { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.stat-tile strong { font-size: 20px; line-height: 1.2; }
+.day-chart { display: flex; flex-direction: column; gap: 6px; }
+.day-bars { display: flex; align-items: flex-end; gap: 2px; height: 96px; border-bottom: 1px solid var(--border); }
+.day-bar { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; min-width: 0; }
+.day-bar > div { width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; opacity: 0.85; }
+.day-bar > div[data-active], .day-bar:focus-visible > div { opacity: 1; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent); }
+.day-axis { justify-content: space-between; }
+.chapter-progress { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.chapter-progress .row { gap: 8px; margin-bottom: 4px; }
+.warn { font-weight: 600; border-inline-start: 3px solid var(--cat-questionable); padding-inline-start: 8px; }
+label.file-button { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 12px; cursor: pointer; color: var(--text); }
+label.file-button:hover { border-color: var(--accent); }
+label.file-button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }

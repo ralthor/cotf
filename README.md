@@ -51,8 +51,16 @@ square.
 - Hints step by step (piece, square, arrow), or *Show move*. *No hints* turns them off.
 - **Mistakes** lists the positions you got wrong and what you played, with a button to practise each.
 
-Only standard chess is supported. Statistics, backups and checking your own games against the
-repertoire come in later phases; see `docs/OPENING_TRAINER.md`.
+**Progress** (the third sub-tab) shows, per repertoire and side: positions learnt and mastered, what
+is due, first-time accuracy and its change, answers per day for the last 30 days, streaks and
+records, progress per chapter, and the hardest positions with a button to practise each.
+
+**Backup** (left column) downloads one JSON file with every repertoire, chapter and training result,
+and restores it here or on another device. It reminds you when you have training progress and no
+backup from the last 7 days.
+
+Only standard chess is supported. Checking your own games against the repertoire comes in a later
+phase; see `docs/OPENING_TRAINER.md`.
 
 ## Languages
 

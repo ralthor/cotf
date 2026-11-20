@@ -94,3 +94,30 @@ describe('trainStore', () => {
     expect(await trainStore.log('r1')).toEqual([]);
   });
 });
+
+describe('backupStore', () => {
+  it('restores repertoires, rebuilds moves and merges the log without duplicates', async () => {
+    const { backupStore, trainStore } = await import('./db');
+    const { makeBackup, parseBackup } = await import('../core/repertoire/backup');
+    const { review } = await import('../core/repertoire/srs');
+    await repertoireStore.put({ id: 'r1', name: 'Italian', createdAt: now, updatedAt: now });
+    await repertoireStore.saveChapters('r1', chapters(ANNOTATED, 'r1'));
+    const srs = await review(undefined, 'good', new Date(now));
+    const entry = { repertoireId: 'r1', side: 'w' as const, posKey: 'k', at: now, mode: 'learn' as const, result: 'good' as const, wrong: [], expected: ['e4'], ms: 900 };
+    await trainStore.answer({ repertoireId: 'r1', side: 'w', posKey: 'k', srs }, entry);
+    const backup = parseBackup(makeBackup(await backupStore.read()));
+
+    // Change things after the backup, then restore.
+    await repertoireStore.saveChapters('r1', chapters('1. d4 *', 'r1'));
+    await repertoireStore.put({ id: 'r2', name: 'Other', createdAt: now, updatedAt: now });
+    await backupStore.restore(backup);
+    await backupStore.restore(backup);
+
+    expect((await repertoireStore.list()).map((r) => r.id).sort()).toEqual(['r1', 'r2']);
+    expect(await repertoireStore.chapters('r1')).toHaveLength(1);
+    const start = posKeyFromFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')!;
+    expect((await repertoireStore.movesFrom('r1', 'w', start)).map((m) => m.san)).toEqual(['e4']);
+    expect((await trainStore.cards('r1', 'w'))[0]!.srs.dueAt).toBeInstanceOf(Date);
+    expect(await trainStore.log('r1')).toHaveLength(1);
+  });
+});

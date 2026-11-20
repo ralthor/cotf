@@ -5,6 +5,7 @@ import type { AnalysisCache } from '../features/analysis/cache';
 import type { GameAnalysis } from '../features/analysis/types';
 import type { Chapter, PosKey, RepMove, Repertoire, Side, TrainCard, TrainLogEntry } from '../core/repertoire/types';
 import { buildMoves } from '../core/repertoire/graph';
+import { logKey, type BackupData } from '../core/repertoire/backup';
 
 interface AnalyserDB extends DBSchema {
   games: { key: string; value: GameRecord; indexes: { importedAt: string } };
@@ -228,8 +229,62 @@ export const trainStore = {
     await tx.objectStore('trainLog').add(entry);
     await tx.done;
   },
+  /** Training cards in all repertoires. */
+  async count(): Promise<number> {
+    const db = await getDb();
+    return db ? db.count('trainCards') : 0;
+  },
   async log(repertoireId: string): Promise<TrainLogEntry[]> {
     const db = await getDb();
     return db ? db.getAllFromIndex('trainLog', 'repertoireId', repertoireId) : [];
+  },
+};
+
+export const backupStore = {
+  /** Every repertoire with its chapters, training cards and answers. */
+  async read(): Promise<BackupData> {
+    const db = await getDb();
+    if (!db) return { repertoires: [], chapters: [], trainCards: [], trainLog: [] };
+    const [repertoires, chapters, trainCards, trainLog] = await Promise.all([
+      db.getAll('repertoires'),
+      db.getAll('chapters'),
+      db.getAll('trainCards'),
+      db.getAll('trainLog'),
+    ]);
+    return { repertoires, chapters, trainCards, trainLog: trainLog.map(({ id: _id, ...e }) => e) };
+  },
+  /**
+   * Restores a backup in one transaction: repertoires in it replace those with the same id (chapters
+   * and move graph included), cards in it replace the browser's, answers not yet logged are added.
+   */
+  async restore(data: BackupData): Promise<void> {
+    const db = await getDb();
+    if (!db) throw new Error('Storage is not available in this browser.');
+    const tx = db.transaction(['repertoires', 'chapters', 'repMoves', 'trainCards', 'trainLog'], 'readwrite');
+    const ids = new Set(data.repertoires.map((r) => r.id));
+    for (const store of ['chapters', 'repMoves'] as const) {
+      for (const id of ids) {
+        let cursor = await tx.objectStore(store).index('repertoireId').openCursor(id);
+        while (cursor) {
+          await cursor.delete();
+          cursor = await cursor.continue();
+        }
+      }
+    }
+    for (const r of data.repertoires) await tx.objectStore('repertoires').put(r);
+    for (const c of data.chapters) await tx.objectStore('chapters').put(c);
+    for (const id of ids) {
+      const chapters = data.chapters.filter((c) => c.repertoireId === id);
+      for (const m of buildMoves(id, chapters)) await tx.objectStore('repMoves').put(m);
+    }
+    for (const c of data.trainCards) await tx.objectStore('trainCards').put(c);
+    const logged = new Set<string>();
+    for (const id of ids) for (const e of await tx.objectStore('trainLog').index('repertoireId').getAll(id)) logged.add(logKey(e));
+    for (const e of data.trainLog) {
+      if (logged.has(logKey(e))) continue;
+      logged.add(logKey(e));
+      await tx.objectStore('trainLog').add(e);
+    }
+    await tx.done;
   },
 };

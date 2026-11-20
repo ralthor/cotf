@@ -121,8 +121,13 @@ export function hintFor(moves: readonly RepMove[], level: number): { squares: st
 }
 
 /** Where a move appears in the chapters in scope: its node and the node before it. */
-export function moveNode(g: TrainGraph, m: RepMove): { chapter: Chapter; node: RepNode; parent: RepNode; path: number[] } | null {
-  for (const ref of m.refs) {
+export function moveNode(
+  g: TrainGraph,
+  m: RepMove,
+  prefer: readonly string[] = [],
+): { chapter: Chapter; node: RepNode; parent: RepNode; path: number[] } | null {
+  const refs = [...m.refs].sort((a, b) => Number(prefer.includes(b.chapterId)) - Number(prefer.includes(a.chapterId)));
+  for (const ref of refs) {
     const chapter = g.chapters.find((c) => c.id === ref.chapterId);
     if (!chapter) continue;
     const node = nodeAt(chapter.root, ref.path);
@@ -130,6 +135,35 @@ export function moveNode(g: TrainGraph, m: RepMove): { chapter: Chapter; node: R
     if (node && parent) return { chapter, node, parent, path: ref.path };
   }
   return null;
+}
+
+/** Chapters in scope (in chapter order) where `m` appears. */
+export function chaptersOf(g: TrainGraph, m: RepMove): string[] {
+  const ids = new Set(m.refs.map((r) => r.chapterId));
+  return g.chapters.filter((c) => ids.has(c.id)).map((c) => c.id);
+}
+
+/**
+ * The chapters a line can still belong to after `m`: those of `current` that contain `m`, or, when
+ * none does (a transposition into another chapter), every chapter that contains `m`.
+ */
+export function narrowChapters(g: TrainGraph, current: readonly string[], m: RepMove): string[] {
+  const ids = chaptersOf(g, m);
+  const kept = current.filter((id) => ids.includes(id));
+  return kept.length ? kept : ids;
+}
+
+/** Chapters in which a move leads to `pos` (the chapters starting there when it is a start). */
+export function positionChapters(g: TrainGraph, pos: PosKey): string[] {
+  const ids = new Set(g.chapters.filter((c) => c.root.posKey === pos).map((c) => c.id));
+  for (const list of g.from.values()) for (const m of list) if (m.to === pos) chaptersOf(g, m).forEach((id) => ids.add(id));
+  return g.chapters.filter((c) => ids.has(c.id)).map((c) => c.id);
+}
+
+/** A chapter's name for the trainer: its title, and the opening header when it says more. */
+export function lineName(ch: Chapter): { title: string; opening: string | null } {
+  const opening = ch.headers.Opening?.trim();
+  return { title: ch.title, opening: opening && opening !== '?' && opening !== ch.title ? opening : null };
 }
 
 /** "1. e4 c5 2. Nf3" for the moves along `path` in a chapter. */

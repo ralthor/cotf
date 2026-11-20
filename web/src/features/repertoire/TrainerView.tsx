@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Chessboard, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
 import { displayComments } from '../../core/repertoire/parse';
-import { hintFor, positionLabel } from '../../core/repertoire/trainer';
+import { hintFor, lineName, positionLabel } from '../../core/repertoire/trainer';
 import type { Chapter, Repertoire, ShapeColor, Side, TrainMode } from '../../core/repertoire/types';
 import { getLocale, t, tn } from '../../i18n';
 import { useT } from '../../i18n/react';
@@ -267,6 +267,11 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
   }
 
   const modeName = t(`train.${s.mode}`);
+  // The line's name: its chapter once only one fits; before that, the opening they all share (if any).
+  const lineChapters = s.chapters.flatMap((id) => tr.graph.chapters.find((c) => c.id === id) ?? []);
+  const names = lineChapters.map(lineName);
+  const shared = names.length > 1 && names.every((n) => n.opening && n.opening === names[0]!.opening) ? names[0]!.opening : null;
+  const single = names.length === 1 ? names[0]! : null;
   const total = s.mode === 'review' ? s.queue.length : 0;
 
   return (
@@ -281,6 +286,33 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
           {s.phase === 'done' ? t('train.back') : t('train.stop')}
         </button>
       </div>
+      {lineChapters.length > 0 && (
+        <p className="train-line-name">
+          {single ? (
+            <>
+              <bdi>{single.title}</bdi>
+              {single.opening && (
+                <span className="muted">
+                  {' · '}
+                  <bdi>{single.opening}</bdi>
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              {shared && (
+                <>
+                  <bdi>{shared}</bdi>
+                  {' · '}
+                </>
+              )}
+              <span className="small muted" title={lineChapters.map((c) => c.title).join('\n')}>
+                {tn('train.sharedChapters', lineChapters.length)}
+              </span>
+            </>
+          )}
+        </p>
+      )}
       <div className="chapter-view">
         <div className="board-col">
           <div className="board-wrap" dir="ltr">

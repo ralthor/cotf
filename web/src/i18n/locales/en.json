@@ -598,5 +598,7 @@
   "backup.error.json": "This file is not a backup (it is not valid JSON).",
   "backup.error.format": "This file is not a Chess on the Fly openings backup.",
   "backup.error.newer": "This backup comes from a newer version of the site. Reload the page and try again.",
-  "backup.error.invalid": "This backup is damaged and was not restored."
+  "backup.error.invalid": "This backup is damaged and was not restored.",
+  "train.sharedChapters.one": "{n} chapter shares these moves",
+  "train.sharedChapters.other": "{n} chapters share these moves"
 }

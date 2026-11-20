@@ -8,6 +8,9 @@ import {
   hintFor,
   isCard,
   lineLabel,
+  lineName,
+  narrowChapters,
+  positionChapters,
   myMoves,
   pickReply,
   pickShown,
@@ -17,7 +20,7 @@ import {
   theirMoves,
 } from './trainer';
 import type { Chapter, Side } from './types';
-import { ANNOTATED, TRANSPOSITION } from '../../test/fixtures/repertoire';
+import { ANNOTATED, LICHESS_STUDY, TRANSPOSITION } from '../../test/fixtures/repertoire';
 
 function chapters(pgn: string, side?: Side): Chapter[] {
   return parseRepertoirePgn(pgn).chapters.map((p, i) => ({
@@ -125,5 +128,25 @@ describe('labels', () => {
     expect(lineLabel(root, [])).toBe('');
     const bc4 = [...g.from.values()].flat().find((m) => m.san === 'Bc4' && m.main)!;
     expect(positionLabel(g, bc4.to)).toBe('1. e4 e5 2. Nf3 Nc6 3. Bc4');
+  });
+});
+
+describe('line names', () => {
+  it('narrows the chapters as the line goes on', () => {
+    const t = buildTrainGraph(chapters(TRANSPOSITION), 'b');
+    const [a, b] = t.chapters.map((c) => c.id);
+    const start = t.starts[0]!;
+    const d4 = theirMoves(t, start).find((m) => m.san === 'd4')!;
+    expect(narrowChapters(t, [a!, b!], d4)).toEqual([a]);
+    // Both orders end in the same position: it belongs to both chapters.
+    const end = [...t.from.values()].flat().find((m) => m.san === 'e6' && m.from !== start && !t.from.has(m.to))!.to;
+    expect(positionChapters(t, end)).toEqual([a, b]);
+    expect(positionChapters(t, start)).toEqual([a, b]);
+  });
+
+  it('uses the opening header when it says more than the title', () => {
+    const [ch] = chapters(LICHESS_STUDY);
+    expect(lineName(ch!)).toEqual({ title: 'Caro-Kann', opening: 'Caro-Kann Defense: Advance Variation' });
+    expect(lineName({ ...ch!, headers: {} }).opening).toBeNull();
   });
 });

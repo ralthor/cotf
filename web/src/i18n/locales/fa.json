@@ -598,5 +598,7 @@
   "backup.error.json": "این فایل پشتیبان نیست (JSON معتبر نیست).",
   "backup.error.format": "این فایل پشتیبان افتتاحیه‌های Chess on the Fly نیست.",
   "backup.error.newer": "این پشتیبان از نسخهٔ جدیدتر سایت است. صفحه را دوباره بارگذاری کنید و دوباره امتحان کنید.",
-  "backup.error.invalid": "این پشتیبان آسیب دیده و بازیابی نشد."
+  "backup.error.invalid": "این پشتیبان آسیب دیده و بازیابی نشد.",
+  "train.sharedChapters.one": "{n} فصل این حرکت‌ها را دارد",
+  "train.sharedChapters.other": "{n} فصل این حرکت‌ها را دارند"
 }

@@ -479,3 +479,4 @@ button.busy:disabled { opacity: 1; cursor: progress; color: var(--muted); border
 label.file-button { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 12px; cursor: pointer; color: var(--text); }
 label.file-button:hover { border-color: var(--accent); }
 label.file-button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.train-line-name { margin: -4px 0 0; font-weight: 600; overflow-wrap: anywhere; }

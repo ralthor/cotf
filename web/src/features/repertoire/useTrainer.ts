@@ -6,6 +6,8 @@ import {
   buildTrainGraph,
   myMoves,
   moveNode,
+  narrowChapters,
+  positionChapters,
   pickReply,
   pickShown,
   pickStart,
@@ -63,6 +65,11 @@ export type Session = {
   notes: Note[];
   /** The opponent's move about to be played. */
   pending: RepMove | null;
+  /**
+   * Chapters the current line or position can belong to, most likely first; one once the line has
+   * left the moves chapters share. Only moves already on the board narrow it.
+   */
+  chapters: string[];
   /** Learn: showing new moves, then replaying the line. Memorise: walking. */
   stage: 'intro' | 'replay' | 'walk';
   lineStart: PosKey;
@@ -86,8 +93,8 @@ const dueNeeds = (ctx: Ctx): Needs => {
   return (k) => isDue(ctx.cards.get(k)?.srs, now);
 };
 
-function noteFor(g: TrainGraph, m: RepMove): Note | null {
-  const at = moveNode(g, m);
+function noteFor(g: TrainGraph, m: RepMove, prefer: readonly string[]): Note | null {
+  const at = moveNode(g, m, prefer);
   return at ? { node: at.node, parent: at.parent, mine: m.mine } : null;
 }
 
@@ -114,6 +121,7 @@ function startLine(s: Session, ctx: Ctx, start: PosKey): Session {
     replayIndex: 0,
     introduced: [],
     lineResults: [],
+    chapters: ctx.g.chapters.filter((c) => c.root.posKey === start).map((c) => c.id),
     stage: s.mode === 'learn' ? 'intro' : 'walk',
   };
 }
@@ -156,9 +164,10 @@ function advance(s: Session, ctx: Ctx): Session {
 
 /** Plays `m` on the board. */
 function play(s: Session, ctx: Ctx, m: RepMove): Session {
-  const note = noteFor(ctx.g, m);
+  const chapters = narrowChapters(ctx.g, s.chapters, m);
+  const note = noteFor(ctx.g, m, chapters);
   const notes = note ? [...s.notes, note].slice(-2) : s.notes.slice(-1);
-  const next: Session = { ...s, pos: m.to, fen: note?.node.fen ?? fenOf(ctx.g, m.to), lastUci: m.uci, notes, pending: null };
+  const next: Session = { ...s, pos: m.to, fen: note?.node.fen ?? fenOf(ctx.g, m.to), lastUci: m.uci, notes, chapters, pending: null };
   if (s.stage === 'replay') return { ...next, replayIndex: s.replayIndex + 1 };
   if (s.mode === 'review') return next;
   return { ...next, line: [...s.line, m] };
@@ -263,6 +272,7 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
         line: [],
         replayIndex: 0,
         introduced: [],
+        chapters: [],
         queue: [],
         queueIndex: 0,
         results: [],
@@ -274,7 +284,7 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
           : [...new Set([...mistakes.map((m) => m.posKey), ...ctx.g.cards.filter((k) => (ctx.cards.get(k)?.srs.lapses ?? 0) > 0)])].slice(0, REVIEW_BATCH);
         const pos = queue[0];
         if (!pos) return setSession(base);
-        setSession({ ...base, queue, pos, fen: fenOf(ctx.g, pos), phase: 'ask', ask: newAsk(pos, myMoves(ctx.g, pos), null, false, true) });
+        setSession({ ...base, queue, pos, fen: fenOf(ctx.g, pos), chapters: positionChapters(ctx.g, pos), phase: 'ask', ask: newAsk(pos, myMoves(ctx.g, pos), null, false, true) });
         return;
       }
       const needs = mode === 'learn' ? learnNeeds(ctx, base) : dueNeeds(ctx);
@@ -293,7 +303,7 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
         const i = s.queueIndex + 1;
         const pos = s.queue[i];
         if (!pos) return { ...s, phase: 'done', ask: null };
-        return { ...s, queueIndex: i, pos, fen: fenOf(ctx.g, pos), lastUci: null, notes: [], phase: 'ask', ask: newAsk(pos, myMoves(ctx.g, pos), null, false, true) };
+        return { ...s, queueIndex: i, pos, fen: fenOf(ctx.g, pos), chapters: positionChapters(ctx.g, pos), lastUci: null, notes: [], phase: 'ask', ask: newAsk(pos, myMoves(ctx.g, pos), null, false, true) };
       }
       const needs = s.mode === 'learn' ? learnNeeds(ctx, { introduced: [] }) : dueNeeds(ctx);
       const first = pickStart(ctx.g, needs, s.mode === 'learn');

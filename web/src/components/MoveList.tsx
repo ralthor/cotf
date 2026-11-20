@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import type { MoveRecord } from '../core/chess/types';
 import type { MoveAnalysis } from '../features/analysis/types';
+import type { EngineScore } from '../core/engine/types';
+import { formatScore } from '../core/scoring/score';
 import { CategoryBadge } from './CategoryBadge';
 import { categoryLabel } from './categoryText';
 import { useT } from '../i18n/react';
@@ -18,12 +20,15 @@ function matches(a: MoveAnalysis | undefined, f: MoveFilter): boolean {
 export function MoveList({
   moves,
   analysis,
+  evals,
   current,
   onSelect,
   filter,
 }: {
   moves: MoveRecord[];
   analysis?: (MoveAnalysis | undefined)[];
+  /** Evaluation of each position (index 0 = start), shown after the move that led to it. */
+  evals?: (EngineScore | undefined)[];
   current: number;
   onSelect: (positionIndex: number) => void;
   filter: MoveFilter;
@@ -65,6 +70,11 @@ export function MoveList({
         {/* Chess notation is always left to right; without this, Persian shows "Qxe4+" as "+Qxe4". */}
         <bdi dir="ltr">{m.san}</bdi>
         <CategoryBadge category={a?.category} candidate={a?.brilliance?.verdict === 'candidate'} />
+        {evals?.[i + 1] && (
+          <bdi dir="ltr" className="move-eval">
+            {formatScore(evals[i + 1])}
+          </bdi>
+        )}
       </button>
     );
   };

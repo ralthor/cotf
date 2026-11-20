@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Chessboard } from 'react-chessboard';
+import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard';
 import { gameTitle } from '../../core/chess/pgn';
 import { lichessAnalysisUrl } from '../../core/chess/links';
-import { fenAfterLine, squarePosition, uciLineToSan } from '../../core/chess/lines';
+import { fenAfterLine, squarePosition } from '../../core/chess/lines';
 import { getPref, setPref } from '../../storage/prefs';
 import { MoveFeedback } from './MoveFeedback';
 import { positionsOf, type GameRecord } from '../../core/chess/types';
 import type { EngineLine, EngineScore } from '../../core/engine/types';
+import type { MoveCategory } from '../../core/classification/classify';
 import { AVAILABLE_FLAVOURS, ENGINE_BUILDS, type EngineFlavour } from '../../core/engine/workerTransport';
 import { expectedScore, formatScore } from '../../core/scoring/score';
 import { useEngine } from '../../app/EngineContext';
@@ -22,10 +23,14 @@ import { PRESETS, type GameAnalysis, type PresetId } from '../analysis/types';
 import { useGameAnalysis } from '../analysis/useGameAnalysis';
 import { useMoveExplainer, whyBadKey } from '../explain/useMoveExplainer';
 import { tOr } from '../../i18n';
+import { gradeKey, legalMove } from '../explore/grade';
+import { useLiveEngine, useMoveGrader } from '../explore/useExplore';
+import { knownLines, nextItem, practicePlies, startPractice, type PracticeState } from '../explore/practice';
+import { LinePanel, LiveEngineRow, PracticePanel } from '../explore/ExplorePanels';
 import { useT } from '../../i18n/react';
 
-type PvPreview = { baseFen: string; moves: string[]; index: number };
-
+/** A line on the board instead of the game: an engine line, or moves the user played (`user`). */
+type PvPreview = { baseFen: string; moves: string[]; index: number; user?: boolean };
 
 function useBoardWidth() {
   const ref = useRef<HTMLDivElement>(null);
@@ -44,6 +49,9 @@ export type GameViewProps = {
   /** Extra actions (e.g. cloud analysis) rendered under the analysis controls. */
   renderExtra?: (ctx: { game: GameRecord; analysis: GameAnalysis | null; setAnalysis: (a: GameAnalysis) => void }) => ReactNode;
 };
+
+/** Time each move stays on the board during autoplay. */
+const AUTOPLAY_MS = 1200;
 
 /** Arrow colours on the main board. */
 const ARROW = {
@@ -75,9 +83,22 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   const { analysis, setAnalysis, running, start, cancel } = useGameAnalysis(game);
   const engine = useEngine();
   const explainer = useMoveExplainer();
+  const grader = useMoveGrader();
+  // Live engine for positions without a stored evaluation (your own lines, or before the analysis).
+  const [engineOn, setEngineOnState] = useState(() => getPref('engineOn') !== '0');
+  const setEngineOn = (v: boolean) => {
+    setEngineOnState(v);
+    setPref('engineOn', v ? null : '0');
+  };
+  // "Learn from your mistakes": replays the board side's mistakes as puzzles.
+  const [practice, setPractice] = useState<PracticeState | null>(null);
   const { ref: boardRef, width: boardWidth } = useBoardWidth();
 
-  const go = useCallback(
+  // Autoplay: steps forward through the game on a timer until paused, the end, or any manual navigation.
+  const [playing, setPlaying] = useState(false);
+
+  /** Shows game position `p` (closing any line preview or "before the move" view). */
+  const show = useCallback(
     (p: number) => {
       setPv(null);
       setBeforeAt(null);
@@ -86,16 +107,52 @@ export function GameView({ game, renderExtra }: GameViewProps) {
     [positions.length],
   );
 
+  /** Navigation by the user: also stops autoplay. */
+  const go = useCallback(
+    (p: number) => {
+      setPlaying(false);
+      show(p);
+    },
+    [show],
+  );
+
   /** One step back/forward: inside an engine-line preview when one is open, else through the game. */
   const step = useCallback(
     (delta: 1 | -1) => {
       if (pv) {
+        setPlaying(false);
         const index = Math.max(0, Math.min(pv.moves.length, pv.index + delta));
         setPv({ ...pv, index });
       } else go(pos + delta);
     },
     [pv, go, pos],
   );
+
+  // Play continues from what is on the board: through the open line (engine or your own), else
+  // through the game. It starts over only when already at the end.
+  const atEnd = pv ? pv.index >= pv.moves.length : pos === positions.length - 1;
+  const togglePlay = useCallback(() => {
+    if (playing) return setPlaying(false);
+    if (pv) {
+      if (atEnd) setPv({ ...pv, index: 0 });
+    } else if (atEnd) show(0);
+    else if (beforeAt === pos && pos > 0) show(pos - 1); // "before the move": play on from that position
+    setPlaying(true);
+  }, [playing, atEnd, pos, show, pv, beforeAt]);
+
+  useEffect(() => {
+    if (!playing || atEnd) return;
+    const id = window.setTimeout(() => {
+      if (pv) {
+        setPv({ ...pv, index: pv.index + 1 });
+        if (pv.index + 1 >= pv.moves.length) setPlaying(false); // reached the end of the line
+      } else {
+        show(pos + 1);
+        if (pos + 1 >= positions.length - 1) setPlaying(false); // reached the last move
+      }
+    }, AUTOPLAY_MS);
+    return () => window.clearTimeout(id);
+  }, [playing, atEnd, pos, show, positions.length, pv]);
 
   // Horizontal swipe on the board steps through moves (phones).
   const touch = useRef<{ x: number; y: number } | null>(null);
@@ -110,6 +167,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
     if (!start || !t) return;
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
+    if (practice) return;
     if (Math.abs(dx) > 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
   };
 
@@ -117,17 +175,19 @@ export function GameView({ game, renderExtra }: GameViewProps) {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
-      if (e.key === 'ArrowLeft') go(pos - 1);
-      else if (e.key === 'ArrowRight') go(pos + 1);
+      if (practice) return; // the practice board has its own buttons
+      if (e.key === 'ArrowLeft') step(-1);
+      else if (e.key === 'ArrowRight') step(1);
       else if (e.key === 'Home') go(0);
       else if (e.key === 'End') go(positions.length - 1);
-      else if (e.key === 'f') setOrientation((o) => (o === 'white' ? 'black' : 'white'));
+      else if (e.key === 'f' && !practice) setOrientation((o) => (o === 'white' ? 'black' : 'white'));
+      else if (e.key === 'p') togglePlay();
       else return;
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [go, pos, positions.length]);
+  }, [go, step, positions.length, togglePlay, practice]);
 
   const lastMove = pos > 0 ? game.moves[pos - 1] : undefined;
   const lastAnalysis = pos > 0 ? analysis?.moves[pos - 1] : undefined;
@@ -136,7 +196,32 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   const lastWhyBad = lastMove ? explainer.whyBad[whyBadKey(lastMove)] : undefined;
   const whyBadReport = lastWhyBad?.status === 'done' ? lastWhyBad.value : undefined;
   const showBefore = !pv && beforeAt === pos && !!lastMove && !!whyBadReport;
-  const fen = pv ? fenAfterLine(pv.baseFen, pv.moves.slice(0, pv.index)) : showBefore ? lastMove!.fenBefore : positions[pos]!;
+  // Practice: the position before the current mistake (with the tried move on it).
+  const practicePly = practice && practice.index < practice.plies.length ? practice.plies[practice.index]! : null;
+  const practiceMove = practicePly !== null ? analysis?.moves[practicePly - 1] : undefined;
+  const practiceFen = practicePly !== null ? positions[practicePly - 1]! : null;
+  const practiceGrade = practice?.attempt && practiceFen ? grader.grades[gradeKey(practiceFen, practice.attempt)] : undefined;
+  const practiceBest = practiceMove?.bestMoveUci ?? practiceMove?.lines[0]?.pvUci[0];
+
+  const fen = practiceFen
+    ? practice!.attempt
+      ? fenAfterLine(practiceFen, [practice!.attempt])
+      : practiceFen
+    : pv
+      ? fenAfterLine(pv.baseFen, pv.moves.slice(0, pv.index))
+      : showBefore
+        ? lastMove!.fenBefore
+        : positions[pos]!;
+
+  // The last move of a line on the board, with its grade if the engine checked it.
+  const lineLast =
+    pv && pv.index > 0 ? { fen: fenAfterLine(pv.baseFen, pv.moves.slice(0, pv.index - 1)), uci: pv.moves[pv.index - 1]! } : null;
+  const lineLastGrade = lineLast ? grader.grades[gradeKey(lineLast.fen, lineLast.uci)] : undefined;
+
+  const storedEval = pv || practiceFen ? undefined : analysis?.positionEvals[showBefore ? pos - 1 : pos];
+  const liveWanted = engineOn && !practiceFen && !running && !storedEval;
+  const live = useLiveEngine(fen, liveWanted);
+  const shownEval = practiceFen ? undefined : (storedEval ?? live?.line?.score);
 
   // Reveals reset whenever the shown position changes.
   const revealBetter = reveal.pos === pos && reveal.better;
@@ -149,6 +234,10 @@ export function GameView({ game, renderExtra }: GameViewProps) {
     const add = (uci: string | undefined, color: string) => {
       if (uci) out.push({ startSquare: uci.slice(0, 2), endSquare: uci.slice(2, 4), color });
     };
+    if (practiceFen) {
+      if (practice?.solution) add(practiceBest, ARROW.best);
+      return out;
+    }
     if (pv) return out;
     if (showBefore && whyBadReport && lastMove) {
       // Before the move: the opponent's threats (red), the move played (orange), the better move (green).
@@ -160,20 +249,82 @@ export function GameView({ game, renderExtra }: GameViewProps) {
     if (showHintArrow) add(currentLines[0]?.pvUci[0], ARROW.best);
     if (boardThreat?.status === 'done') for (const t of boardThreat.value?.real ?? []) add(t.uci, ARROW.threat);
     return out;
-  }, [showHintArrow, currentLines, boardThreat, pv, showBefore, whyBadReport, lastMove]);
+  }, [showHintArrow, currentLines, boardThreat, pv, showBefore, whyBadReport, lastMove, practiceFen, practice?.solution, practiceBest]);
+
+  // The move highlighted on the board, with its category: the tried move in practice (or the
+  // opponent's move before it), the last move of a line, or the game's last move.
+  const boardMove: { uci: string; category?: MoveCategory } | null = practiceFen
+    ? practice!.attempt
+      ? { uci: practice!.attempt, category: practiceGrade?.status === 'done' ? practiceGrade.value.category : undefined }
+      : practicePly! > 1
+        ? { uci: game.moves[practicePly! - 2]!.uci }
+        : null
+    : pv
+      ? lineLast && { uci: lineLast.uci, category: lineLastGrade?.status === 'done' ? lineLastGrade.value.category : undefined }
+      : showBefore || !lastMove
+        ? null
+        : { uci: lastMove.uci, category: lastAnalysis?.category };
+  const boardMoveUci = boardMove?.uci;
+  const boardMoveCategory = boardMove?.category;
 
   // Category badge on the square where the moved piece landed.
-  const badge =
-    !pv && !showBefore && lastMove && lastAnalysis?.category
-      ? { ...squarePosition(lastMove.uci.slice(2, 4), orientation), category: lastAnalysis.category }
-      : null;
+  const badge = boardMove?.category ? { ...squarePosition(boardMove.uci.slice(2, 4), orientation), category: boardMove.category } : null;
 
+  const hintSquare = practiceFen && practice?.hint && !practice.attempt ? practiceBest?.slice(0, 2) : undefined;
   const squareStyles = useMemo(() => {
-    if (!lastMove || pv || showBefore) return {};
-    const color = lastAnalysis?.category ? `var(--cat-${lastAnalysis.category})` : 'var(--accent)';
-    const style = { boxShadow: `inset 0 0 0 4px ${color}` };
-    return { [lastMove.uci.slice(0, 2)]: { ...style, opacity: 0.9 }, [lastMove.uci.slice(2, 4)]: style };
-  }, [lastMove, lastAnalysis, pv, showBefore]);
+    const out: Record<string, React.CSSProperties> = {};
+    if (boardMoveUci) {
+      const color = boardMoveCategory ? `var(--cat-${boardMoveCategory})` : 'var(--accent)';
+      const style = { boxShadow: `inset 0 0 0 4px ${color}` };
+      out[boardMoveUci.slice(0, 2)] = { ...style, opacity: 0.9 };
+      out[boardMoveUci.slice(2, 4)] = style;
+    }
+    if (hintSquare) out[hintSquare] = { background: 'radial-gradient(circle, rgba(60,125,58,0.6) 35%, transparent 72%)' };
+    return out;
+  }, [boardMoveUci, boardMoveCategory, hintSquare]);
+
+  // Pieces can be moved at any time: in the game this starts your own line, in practice it is your answer.
+  const sideToMove = fen.split(' ')[1] === 'b' ? 'b' : 'w';
+  const canDrag = practiceFen ? !practice!.attempt && !practice!.solution : true;
+  const onPieceDrop = ({ sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
+    if (!targetSquare || sourceSquare === targetSquare || !canDrag) return false;
+    const m = legalMove(fen, sourceSquare, targetSquare);
+    if (!m) return false;
+    if (practice && practiceFen && practiceMove) {
+      setPractice({ ...practice, attempt: m.uci });
+      void grader.grade(practiceFen, m.uci, knownLines(practiceMove));
+      return true;
+    }
+    setPlaying(false);
+    // Lines the analysis already has for this position, so grading needs fewer searches.
+    const known = pv ? undefined : showBefore ? lastAnalysis?.lines : currentLines;
+    if (pv) {
+      const moves = [...pv.moves.slice(0, pv.index), m.uci];
+      setPv({ baseFen: pv.baseFen, moves, index: moves.length, user: true });
+    } else if (!showBefore && game.moves[pos]?.uci === m.uci) {
+      show(pos + 1); // the move from the game: just step forward
+      return true;
+    } else {
+      setBeforeAt(null);
+      setPv({ baseFen: fen, moves: [m.uci], index: 1, user: true });
+    }
+    if (engineOn) void grader.grade(fen, m.uci, known);
+    return true;
+  };
+
+  const side = orientation === 'white' ? 'w' : 'b';
+  const sideName = side === 'w' ? t('practice.white') : t('practice.black');
+  const mistakes = useMemo(() => practicePlies(analysis?.moves, side), [analysis?.moves, side]);
+  const startPracticeHere = () => {
+    setPlaying(false);
+    setPv(null);
+    setBeforeAt(null);
+    setPractice(startPractice(side, mistakes));
+  };
+  const exitPractice = () => {
+    if (practicePly !== null) show(practicePly - 1);
+    setPractice(null);
+  };
 
   const progressPct = analysis ? Math.round((analysis.progress.done / Math.max(1, analysis.progress.total)) * 100) : 0;
   const title = gameTitle(game);
@@ -183,7 +334,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   const showAnalyseBlock = running ? !fromBottom : !analysisDone;
   const busyLabel = running
     ? `${progressPct}%`
-    : boardThreat?.status === 'running' || lastWhyBad?.status === 'running'
+    : boardThreat?.status === 'running' || lastWhyBad?.status === 'running' || lineLastGrade?.status === 'running'
       ? t('board.calculating')
       : null;
 
@@ -202,7 +353,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   }, [boardRef]);
   const notify = useCallback((text: string) => {
     if (!boardVisible.current) setToast(text);
-  }, []);
+  }, [setToast]);
   useEffect(() => {
     if (!toast) return;
     const id = window.setTimeout(() => setToast(null), 10_000);
@@ -260,10 +411,15 @@ export function GameView({ game, renderExtra }: GameViewProps) {
             {t('game.openSource')} ↗
           </a>
         )}
+        <label className="engine-switch" title={t('engine.title')}>
+          <input type="checkbox" role="switch" checked={engineOn} onChange={(e) => setEngineOn(e.target.checked)} />
+          <span>{t('engine.toggle')}</span>
+        </label>
         <button
           type="button"
           className="icon-button"
           onClick={() => setOrientation((o) => (o === 'white' ? 'black' : 'white'))}
+          disabled={!!practice}
           aria-label={t('game.flip')}
           title={t('game.flip')}
         >
@@ -283,17 +439,19 @@ export function GameView({ game, renderExtra }: GameViewProps) {
 
       <div className="review">
         <div className="eval-bar-v">
-          <EvalBar score={pv ? undefined : analysis?.positionEvals[showBefore ? pos - 1 : pos]} orientation={orientation} height={boardWidth} />
+          <EvalBar score={shownEval} orientation={orientation} height={boardWidth} />
         </div>
         <div className="board-col">
-          <EvalStrip score={pv ? undefined : analysis?.positionEvals[showBefore ? pos - 1 : pos]} />
+          <EvalStrip score={shownEval} />
           <div ref={boardRef} className="board-wrap" dir="ltr" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
             <Chessboard
               options={{
                 id: 'review-board',
                 position: fen,
                 boardOrientation: orientation,
-                allowDragging: false,
+                allowDragging: canDrag,
+                canDragPiece: ({ piece }) => piece.pieceType[0] === (practiceFen ? practice!.side : sideToMove),
+                onPieceDrop,
                 arrows,
                 squareStyles,
                 lightSquareStyle: { backgroundColor: 'var(--board-light)' },
@@ -312,115 +470,156 @@ export function GameView({ game, renderExtra }: GameViewProps) {
               </div>
             )}
           </div>
-          <div className="controls" role="group" aria-label={t('game.nav')} dir="ltr">
-            <button type="button" onClick={() => go(0)} aria-label={t('game.first')} title={t('game.first')} disabled={pos === 0 && !pv}>
-              <Icon name="first" />
-            </button>
-            <button type="button" onClick={() => step(-1)} aria-label={t('game.prev')} title={t('game.prev')} disabled={pos === 0 && !pv}>
-              <Icon name="prev" />
-            </button>
-            <button type="button" onClick={() => step(1)} aria-label={t('game.next')} title={t('game.next')} disabled={pos === positions.length - 1 && !pv}>
-              <Icon name="next" />
-            </button>
-            <button type="button" onClick={() => go(positions.length - 1)} aria-label={t('game.last')} title={t('game.last')} disabled={pos === positions.length - 1 && !pv}>
-              <Icon name="last" />
-            </button>
-          </div>
-          {showAnalyseBlock && (
-            <div className="analyse-cta" aria-live="polite">
-              {running ? (
-                <div className="analyse-progress">
-                  <div
-                    className="analyse-progress-bar"
-                    role="progressbar"
-                    aria-valuenow={progressPct}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label={t('game.analysing', { pct: progressPct })}
-                  >
-                    <div style={{ width: `${progressPct}%` }} />
-                    <span>
-                      <Spinner /> {t('game.analysing', { pct: progressPct })}
-                    </span>
+          {practice ? (
+            <PracticePanel
+              practice={practice}
+              move={practiceMove}
+              fen={practiceFen ?? undefined}
+              grade={practiceGrade}
+              onTryAgain={() => setPractice({ ...practice, attempt: null, tries: practice.tries + 1 })}
+              onHint={() => setPractice({ ...practice, hint: true })}
+              onSolution={() => setPractice({ ...practice, solution: true, attempt: null })}
+              onNext={(r) => setPractice(nextItem(practice, r))}
+              onExit={exitPractice}
+              onRestart={() => setPractice(startPractice(practice.side, practice.plies))}
+            />
+          ) : (
+            <>
+            <div className="controls" role="group" aria-label={t('game.nav')} dir="ltr">
+              <button type="button" onClick={() => go(0)} aria-label={t('game.first')} title={t('game.first')} disabled={pos === 0 && !pv}>
+                <Icon name="first" />
+              </button>
+              <button type="button" onClick={() => step(-1)} aria-label={t('game.prev')} title={t('game.prev')} disabled={pos === 0 && !pv}>
+                <Icon name="prev" />
+              </button>
+              <button
+                type="button"
+                className={playing ? 'play-button playing' : 'play-button'}
+                onClick={togglePlay}
+                aria-label={playing ? t('game.pause') : t('game.play')}
+                aria-pressed={playing}
+                title={`${playing ? t('game.pause') : t('game.play')} (P)`}
+              >
+                <Icon name={playing ? 'pause' : 'play'} />
+              </button>
+              <button type="button" onClick={() => step(1)} aria-label={t('game.next')} title={t('game.next')} disabled={pos === positions.length - 1 && !pv}>
+                <Icon name="next" />
+              </button>
+              <button type="button" onClick={() => go(positions.length - 1)} aria-label={t('game.last')} title={t('game.last')} disabled={pos === positions.length - 1 && !pv}>
+                <Icon name="last" />
+              </button>
+            </div>
+            {showAnalyseBlock && (
+              <div className="analyse-cta" aria-live="polite">
+                {running ? (
+                  <div className="analyse-progress">
+                    <div
+                      className="analyse-progress-bar"
+                      role="progressbar"
+                      aria-valuenow={progressPct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label={t('game.analysing', { pct: progressPct })}
+                    >
+                      <div style={{ width: `${progressPct}%` }} />
+                      <span>
+                        <Spinner /> {t('game.analysing', { pct: progressPct })}
+                      </span>
+                    </div>
+                    <button type="button" onClick={cancel}>{t('common.cancel')}</button>
                   </div>
-                  <button type="button" onClick={cancel}>{t('common.cancel')}</button>
-                </div>
-              ) : (
-                <div className="analyse-start">
-                  <button
-                    type="button"
-                    className="primary big"
-                    onClick={() => {
-                      setFromBottom(false);
-                      void start();
-                    }}
-                  >
-                    {t('game.analyse')}
-                  </button>
-                  <select
-                    aria-label={t('game.depth')}
-                    title={tOr(`preset.${engine.presetId}`, PRESETS[engine.presetId].label)}
-                    value={engine.presetId}
-                    onChange={(e) => engine.setPresetId(e.target.value as PresetId)}
-                  >
-                    {/* Short names here ("Standard"); the settings panel shows the depths. */}
-                    {Object.values(PRESETS).map((p) => (
-                      <option key={p.id} value={p.id}>{tOr(`preset.${p.id}`, p.label).replace(/\s*\(.*\)\s*$/, '')}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {analysis && !running && analysis.phase === 'cancelled' && <p className="small muted">{t('game.cancelled')}</p>}
-              {analysis && !running && analysis.phase === 'error' && <p className="small error">{t('game.failed', { error: analysis.error ?? '' })}</p>}
-              {running && analysis && <p className="small muted">{`${tOr(`phase.analysis.${analysis.phase}`, analysis.phase.replace('-', ' '))} · ${analysis.progress.label}`}</p>}
-              {engine.status === 'loading' && <p className="small muted">{t('game.loadingEngine')}</p>}
-              {engine.status === 'error' && <p className="small error">{t('game.engineFailed', { error: engine.error ?? '' })}</p>}
-            </div>
+                ) : (
+                  <div className="analyse-start">
+                    <button
+                      type="button"
+                      className="primary big"
+                      onClick={() => {
+                        setFromBottom(false);
+                        void start();
+                      }}
+                    >
+                      {t('game.analyse')}
+                    </button>
+                    <select
+                      aria-label={t('game.depth')}
+                      title={tOr(`preset.${engine.presetId}`, PRESETS[engine.presetId].label)}
+                      value={engine.presetId}
+                      onChange={(e) => engine.setPresetId(e.target.value as PresetId)}
+                    >
+                      {/* Short names here ("Standard"); the settings panel shows the depths. */}
+                      {Object.values(PRESETS).map((p) => (
+                        <option key={p.id} value={p.id}>{tOr(`preset.${p.id}`, p.label).replace(/\s*\(.*\)\s*$/, '')}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {analysis && !running && analysis.phase === 'cancelled' && <p className="small muted">{t('game.cancelled')}</p>}
+                {analysis && !running && analysis.phase === 'error' && <p className="small error">{t('game.failed', { error: analysis.error ?? '' })}</p>}
+                {running && analysis && <p className="small muted">{`${tOr(`phase.analysis.${analysis.phase}`, analysis.phase.replace('-', ' '))} · ${analysis.progress.label}`}</p>}
+                {engine.status === 'loading' && <p className="small muted">{t('game.loadingEngine')}</p>}
+                {engine.status === 'error' && <p className="small error">{t('game.engineFailed', { error: engine.error ?? '' })}</p>}
+              </div>
+            )}
+            {liveWanted && <LiveEngineRow live={live} />}
+            {pv && (
+              <LinePanel
+                baseFen={pv.baseFen}
+                moves={pv.moves}
+                index={pv.index}
+                user={!!pv.user}
+                engineOn={engineOn}
+                grades={grader.grades}
+                onIndex={(index) => {
+                  setPlaying(false);
+                  setPv({ ...pv, index });
+                }}
+                onBack={() => go(pos)}
+              />
+            )}
+            {analysisDone && !pv && (mistakes.length > 0 ? (
+              <button type="button" className="practice-start" onClick={startPracticeHere}>
+                {t('practice.start', { n: mistakes.length, side: sideName })}
+              </button>
+            ) : (
+              <p className="small muted practice-none">{t('practice.none', { side: sideName })}</p>
+            ))}
+            <MoveFeedback
+              move={lastMove}
+              analysis={lastAnalysis}
+              nextLines={currentLines}
+              boardFen={positions[pos]!}
+              revealBetter={revealBetter}
+              revealHint={revealHint}
+              alwaysShow={alwaysShow}
+              onRevealBetter={() => setReveal({ pos, better: true, hint: revealHint })}
+              onRevealHint={() => setReveal({ pos, better: revealBetter, hint: true })}
+              onAlwaysShow={setAlwaysShow}
+              onPlayLine={(baseFen, moves) => {
+                setPlaying(false);
+                setPv({ baseFen, moves, index: 1 });
+              }}
+              onExplainBrilliance={lastMove ? () => setExplainPly(lastMove.ply) : undefined}
+              analysed={!!analysis}
+              whyBad={lastWhyBad}
+              onWhyBad={
+                lastMove
+                  ? () => {
+                      setBeforeAt(pos);
+                      if (!lastWhyBad || lastWhyBad.status === 'error') void explainer.explainMove(lastMove);
+                    }
+                  : undefined
+              }
+              showingBefore={showBefore}
+              onShowBefore={(on) => {
+                setPlaying(false);
+                setPv(null);
+                setBeforeAt(on ? pos : null);
+              }}
+              threat={boardThreat}
+              onFindThreat={lastMove?.san.endsWith('#') ? undefined : () => void explainer.findThreat(positions[pos]!)}
+            />
+            </>
           )}
-          {pv && (
-            <div className="notice row" style={{ marginTop: 8, justifyContent: 'space-between' }}>
-              <span>
-                {t('game.previewLine')}{' '}
-                <span dir="ltr">{uciLineToSan(pv.baseFen, pv.moves).slice(0, pv.index).join(' ') || t('game.lineStart')}</span>
-              </span>
-              <span className="row">
-                <button type="button" onClick={() => setPv({ ...pv, index: Math.max(0, pv.index - 1) })}>◀</button>
-                <button type="button" onClick={() => setPv({ ...pv, index: Math.min(pv.moves.length, pv.index + 1) })}>▶</button>
-                <button type="button" onClick={() => setPv(null)}>{t('game.backToGame')}</button>
-              </span>
-            </div>
-          )}
-          <MoveFeedback
-            move={lastMove}
-            analysis={lastAnalysis}
-            nextLines={currentLines}
-            boardFen={positions[pos]!}
-            revealBetter={revealBetter}
-            revealHint={revealHint}
-            alwaysShow={alwaysShow}
-            onRevealBetter={() => setReveal({ pos, better: true, hint: revealHint })}
-            onRevealHint={() => setReveal({ pos, better: revealBetter, hint: true })}
-            onAlwaysShow={setAlwaysShow}
-            onPlayLine={(baseFen, moves) => setPv({ baseFen, moves, index: 1 })}
-            onExplainBrilliance={lastMove ? () => setExplainPly(lastMove.ply) : undefined}
-            analysed={!!analysis}
-            whyBad={lastWhyBad}
-            onWhyBad={
-              lastMove
-                ? () => {
-                    setBeforeAt(pos);
-                    if (!lastWhyBad || lastWhyBad.status === 'error') void explainer.explainMove(lastMove);
-                  }
-                : undefined
-            }
-            showingBefore={showBefore}
-            onShowBefore={(on) => {
-              setPv(null);
-              setBeforeAt(on ? pos : null);
-            }}
-            threat={boardThreat}
-            onFindThreat={lastMove?.san.endsWith('#') ? undefined : () => void explainer.findThreat(positions[pos]!)}
-          />
           {analysis && (
             <div className="panel" style={{ marginTop: 12, padding: 8 }}>
               <EvalChart
@@ -447,7 +646,7 @@ export function GameView({ game, renderExtra }: GameViewProps) {
                 </select>
               </label>
             </div>
-            <MoveList moves={game.moves} analysis={analysis?.moves} current={pos} onSelect={go} filter={filter} />
+            <MoveList moves={game.moves} analysis={analysis?.moves} evals={analysis?.positionEvals} current={pos} onSelect={go} filter={filter} />
           </section>
 
           {analysis?.summary && (

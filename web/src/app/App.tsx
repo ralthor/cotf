@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { gameTitle } from '../core/chess/pgn';
 import type { GameRecord } from '../core/chess/types';
 import { GameView } from '../features/game/GameView';
@@ -16,6 +16,9 @@ import { ImportError } from '../features/import/http';
 import { About, Disclaimer } from './About';
 import { LanguageSelect, useT } from '../i18n/react';
 import { Icon } from '../components/Icon';
+
+// Loaded on first visit to the Openings tab, so the analyser does not download chessops.
+const OpeningsView = lazy(() => import('../features/repertoire/OpeningsView').then((m) => ({ default: m.OpeningsView })));
 
 export function App() {
   return (
@@ -118,6 +121,7 @@ function Shell() {
   const showGames = gamesOpen ?? !selected;
   const nav: { route: Route; label: string; show: boolean }[] = [
     { route: 'analyse', label: t('nav.analyse'), show: true },
+    { route: 'openings', label: t('nav.openings'), show: true },
     { route: 'library', label: t('nav.library'), show: backendEnabled },
     { route: 'stats', label: t('nav.stats'), show: backendEnabled },
     { route: 'about', label: t('nav.about'), show: true },
@@ -216,6 +220,11 @@ function Shell() {
               )}
             </div>
           </div>
+        )}
+        {route === 'openings' && (
+          <Suspense fallback={<p className="small muted">{t('common.loading')}</p>}>
+            <OpeningsView />
+          </Suspense>
         )}
         {route === 'library' && backendEnabled && <LibraryView onOpenGame={onImported} />}
         {route === 'stats' && backendEnabled && <StatsView />}

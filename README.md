@@ -27,6 +27,23 @@ The 95 MB full engine is always offered and only downloaded when chosen. "Parall
 
 The app remembers your Chess.com and Lichess usernames, imported games and analyses in this browser (localStorage and IndexedDB). Each device keeps its own copy. On any board, **Lichess ↗** opens the current position on the Lichess analysis board. On phones you can swipe across the board to step through moves.
 
+## Openings
+
+The **Openings** tab holds opening repertoires, kept in this browser like everything else.
+
+- Import a public or unlisted **Lichess study** by its link (all chapters), a single **chapter** link,
+  a **PGN file** or **pasted PGN**. Every variation, comment, move symbol (`!`, `?!`, `±`…), `[%eval]`,
+  arrow and highlighted square is kept. Clocks are dropped.
+- Keep several repertoires. Each chapter is trained as White or Black: taken from the study's
+  orientation, or chosen at import, and changeable later.
+- Importing the same study again, or **Update from Lichess**, replaces its chapters in place.
+- Browse a chapter on the board with its comments and arrows, and the full move tree. Keys: ← →
+  through moves, ↑ ↓ between variations, Home / End, F to flip.
+- Download a chapter or a whole repertoire as PGN, with all annotations.
+
+Only standard chess is supported. Training (spaced repetition) comes in a later phase; see
+`docs/OPENING_TRAINER.md`.
+
 ## Languages
 
 English and Persian (right-to-left). Pick one in the header menu; the choice is kept in

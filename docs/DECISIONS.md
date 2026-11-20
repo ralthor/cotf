@@ -179,3 +179,34 @@ the original idea more closely: **limit the look-ahead to 1–3 plies and requir
   +0.61 → +2.00"), never the internal expected-score points.
 - **Opera Game checks:** 3...Bg4 ignored the threat dxe5; 6...Nf6 stopped Qxf7# but allowed Qb3 (positional);
   10...cxb5 missed Qb4+ and allowed Bxb5+ (the engine's line wins Black's queen for a bishop).
+
+## Opening repertoires (phase 1, 20 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE1.md`. Background: `OPENING_TRAINER.md`.
+
+- **chessops 0.15.1** (GPL-3.0-or-later) parses and writes repertoire PGN: full variation tree,
+  NAGs, comments, `[%cal]`/`[%csl]` shapes and `[%eval]`. The analyser keeps using chess.js.
+  Castling is stored as standard UCI (`e1g1`), not chessops' king-takes-rook form, and SAN is
+  rewritten in canonical form (with check signs).
+- **Position key** = `makeFen(pos.toSetup(), { epd: true })`: no move counters, en-passant square
+  only when a capture is legal. Transpositions and repeated positions across chapters merge.
+- **Chapters keep their tree**; the `repMoves` store is derived from them and rebuilt in the same
+  transaction on every change, so it cannot drift.
+- **Side is per chapter** (from `[Orientation]`, else chosen at import), because studies mix sides.
+  Re-imports keep the side the user chose.
+- **Lichess chapters have stable ids** (`lichess:<study>:<chapter>`), so importing a study again
+  replaces chapters in place. `wholeStudy` records whether a study was imported whole; *Update from
+  Lichess* then fetches the whole study (adding new chapters), otherwise only the imported chapters.
+- **Unknown `[%…]` commands** (e.g. Lichess' `[%anno …]`) stay in the stored comment and in exported
+  PGN, but are hidden on screen.
+- **IndexedDB version 2** adds `repertoires`, `chapters` and `repMoves`. The upgrade callback now
+  branches on `oldVersion`; the old one created every store unconditionally and would have thrown on
+  any upgrade. A test upgrades a version 1 database with a game in it.
+- **Arrow colours** are Lichess' study colours as constants, not CSS tokens: react-chessboard draws
+  arrows as SVG attributes, where `var()` is not reliable.
+- **The Openings tab is lazy-loaded** (74 kB chunk), so the analyser does not download chessops. The
+  main bundle grew by about 16 kB (mostly translations).
+- **Verified 20 Nov 2026:** `lichess.org/api/study/{id}.pgn` and `…/{id}/{chapter}.pgn` send
+  `Access-Control-Allow-Origin: *`; a private or missing study is 404. The opening explorer
+  (`explorer.lichess.ovh`) answers 401 without a token. Tested in the browser with a public 56-chapter
+  study (414 arrows, 164 highlighted squares, nested variations): imported with no warnings.

@@ -418,3 +418,34 @@ button.busy:disabled { opacity: 1; cursor: progress; color: var(--muted); border
   .engine-switch { min-height: 40px; }
   .engine-switch span { font-size: 12px; }
 }
+
+/* ---- Openings tab: repertoires, chapters and the chapter viewer ---- */
+.chapter-view { display: grid; grid-template-columns: minmax(280px, 560px) minmax(260px, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 1100px) { .chapter-view { grid-template-columns: minmax(0, 1fr); } }
+.chapter-view .board-col { min-width: 0; }
+.chapter-comment p { margin: 6px 0; white-space: pre-line; }
+.chapter-comment h3 { gap: 6px; }
+.next-moves { margin-top: 8px; }
+.variation-tree { position: relative; max-height: 420px; overflow: auto; line-height: 1.9; font-size: 14px; }
+.tree-move { border: none; background: none; padding: 1px 4px; border-radius: 4px; }
+.tree-move[aria-current='true'] { background: var(--surface-2); outline: 1px solid var(--accent); }
+.tree-nag { color: var(--accent); font-weight: 700; }
+.tree-comment { color: var(--muted); font-size: 13px; margin: 0 4px; }
+.tree-variations { margin: 2px 0 4px; }
+.tree-variation { margin-inline-start: 12px; padding-inline-start: 8px; border-inline-start: 2px solid var(--border); }
+.tree-expand { margin-inline-start: 4px; }
+.side-choice { border: none; padding: 0; margin: 0; }
+.side-choice legend { padding: 0; margin-bottom: 4px; }
+.game-list button.link { width: auto; flex: 0 0 auto; padding: 4px 6px; }
+.chapter-list .side-select { padding: 2px 4px; }
+.rep-rename { flex: 1; flex-wrap: nowrap; padding: 4px 0; }
+.rep-rename input { flex: 1; min-width: 0; }
+@media (max-width: 700px) {
+  .variation-tree { max-height: 300px; font-size: 15px; }
+  .tree-move { min-height: 32px; }
+}
+.rep-picker { gap: 6px 12px; }
+.rep-select { flex: 1 1 100%; min-width: 0; flex-wrap: nowrap; }
+.rep-select select { flex: 1; min-width: 0; }
+.fold-toggle { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 0; font: inherit; font-weight: 600; }
+.fold-toggle[aria-expanded='true'] .icon { transform: rotate(180deg); }

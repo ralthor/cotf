@@ -3,16 +3,26 @@ import type { GameRecord } from '../core/chess/types';
 import type { PositionAnalysis } from '../core/engine/types';
 import type { AnalysisCache } from '../features/analysis/cache';
 import type { GameAnalysis } from '../features/analysis/types';
+import type { Chapter, PosKey, RepMove, Repertoire, Side } from '../core/repertoire/types';
+import { buildMoves } from '../core/repertoire/graph';
 
 interface AnalyserDB extends DBSchema {
   games: { key: string; value: GameRecord; indexes: { importedAt: string } };
   positions: { key: string; value: PositionAnalysis };
   analyses: { key: string; value: GameAnalysis & { key: string } };
   settings: { key: string; value: unknown };
+  // Version 2: opening repertoires.
+  repertoires: { key: string; value: Repertoire };
+  chapters: { key: string; value: Chapter; indexes: { repertoireId: string } };
+  repMoves: {
+    key: [string, Side, PosKey, string];
+    value: RepMove;
+    indexes: { repertoireId: string; from: [string, Side, PosKey] };
+  };
 }
 
-const DB_NAME = 'chess-analyser';
-const DB_VERSION = 1;
+export const DB_NAME = 'chess-analyser';
+const DB_VERSION = 2;
 const MAX_GAMES = 500;
 
 let dbPromise: Promise<IDBPDatabase<AnalyserDB> | null> | null = null;
@@ -22,16 +32,33 @@ export function getDb(): Promise<IDBPDatabase<AnalyserDB> | null> {
   if (!dbPromise) {
     if (typeof indexedDB === 'undefined') return (dbPromise = Promise.resolve(null));
     dbPromise = openDB<AnalyserDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const games = db.createObjectStore('games', { keyPath: 'id' });
-        games.createIndex('importedAt', 'importedAt');
-        db.createObjectStore('positions');
-        db.createObjectStore('analyses', { keyPath: 'key' });
-        db.createObjectStore('settings');
+      // Each version only adds stores, so data from earlier versions is kept.
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const games = db.createObjectStore('games', { keyPath: 'id' });
+          games.createIndex('importedAt', 'importedAt');
+          db.createObjectStore('positions');
+          db.createObjectStore('analyses', { keyPath: 'key' });
+          db.createObjectStore('settings');
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore('repertoires', { keyPath: 'id' });
+          db.createObjectStore('chapters', { keyPath: 'id' }).createIndex('repertoireId', 'repertoireId');
+          const moves = db.createObjectStore('repMoves', { keyPath: ['repertoireId', 'side', 'from', 'uci'] });
+          moves.createIndex('repertoireId', 'repertoireId');
+          moves.createIndex('from', ['repertoireId', 'side', 'from']);
+        }
       },
     }).catch(() => null);
   }
   return dbPromise;
+}
+
+/** Tests only: forget the open connection so the next getDb() opens (and upgrades) again. */
+export async function closeDbForTests(): Promise<void> {
+  const db = await dbPromise;
+  db?.close();
+  dbPromise = null;
 }
 
 export function analysisKey(gameId: string, presetId: string, policyVersion: string): string {
@@ -108,3 +135,73 @@ export class IdbAnalysisCache implements AnalysisCache {
     await db?.put('positions', value, key).catch(() => undefined);
   }
 }
+
+/** Opening repertoires, their chapters, and the move graph derived from the chapters. */
+export const repertoireStore = {
+  async list(): Promise<Repertoire[]> {
+    const db = await getDb();
+    if (!db) return [];
+    const all = await db.getAll('repertoires');
+    return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+  async put(rep: Repertoire): Promise<void> {
+    const db = await getDb();
+    await db?.put('repertoires', rep);
+  },
+  /** Deletes a repertoire with its chapters and moves. */
+  async remove(id: string): Promise<void> {
+    const db = await getDb();
+    if (!db) return;
+    const tx = db.transaction(['repertoires', 'chapters', 'repMoves'], 'readwrite');
+    await tx.objectStore('repertoires').delete(id);
+    for (const store of ['chapters', 'repMoves'] as const) {
+      let cursor = await tx.objectStore(store).index('repertoireId').openCursor(id);
+      while (cursor) {
+        await cursor.delete();
+        cursor = await cursor.continue();
+      }
+    }
+    await tx.done;
+  },
+  async chapters(repertoireId: string): Promise<Chapter[]> {
+    const db = await getDb();
+    if (!db) return [];
+    const all = await db.getAllFromIndex('chapters', 'repertoireId', repertoireId);
+    return all.sort((a, b) => a.order - b.order);
+  },
+  /**
+   * Replaces the repertoire's chapters with `chapters` (adding, updating and deleting) and
+   * rebuilds its move graph, in one transaction.
+   */
+  async saveChapters(repertoireId: string, chapters: readonly Chapter[]): Promise<void> {
+    const db = await getDb();
+    if (!db) return;
+    const tx = db.transaction(['repertoires', 'chapters', 'repMoves'], 'readwrite');
+    const chapterStore = tx.objectStore('chapters');
+    const keep = new Set(chapters.map((c) => c.id));
+    let cursor = await chapterStore.index('repertoireId').openCursor(repertoireId);
+    while (cursor) {
+      if (!keep.has(cursor.value.id)) await cursor.delete();
+      cursor = await cursor.continue();
+    }
+    for (const c of chapters) await chapterStore.put(c);
+    const moveStore = tx.objectStore('repMoves');
+    let mc = await moveStore.index('repertoireId').openCursor(repertoireId);
+    while (mc) {
+      await mc.delete();
+      mc = await mc.continue();
+    }
+    for (const m of buildMoves(repertoireId, chapters)) await moveStore.put(m);
+    const rep = await tx.objectStore('repertoires').get(repertoireId);
+    if (rep) await tx.objectStore('repertoires').put({ ...rep, updatedAt: new Date().toISOString() });
+    await tx.done;
+  },
+  async movesFrom(repertoireId: string, side: Side, from: PosKey): Promise<RepMove[]> {
+    const db = await getDb();
+    return db ? db.getAllFromIndex('repMoves', 'from', [repertoireId, side, from]) : [];
+  },
+  async moves(repertoireId: string): Promise<RepMove[]> {
+    const db = await getDb();
+    return db ? db.getAllFromIndex('repMoves', 'repertoireId', repertoireId) : [];
+  },
+};

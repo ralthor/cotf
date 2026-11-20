@@ -4,3 +4,4 @@ public/engines
 playwright-report
 test-results
 *.local
+.pages-preview*

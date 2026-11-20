@@ -297,3 +297,17 @@ Plan: `OPENING_TRAINER_PHASE5.md`.
   folded by default and fetches after a 250 ms pause with a session cache.
 - **"Your openings" groups by family** (the name before the colon): variation names split games too
   finely to show a score.
+
+## Installable app and offline use (phase 6, 20 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE6.md`.
+
+- **vite-plugin-pwa 2.0.0** (MIT) with Workbox's generated service worker; no hand-written worker.
+- **Precache the app, not the big engine**: everything built plus the lite engine (about 3 MB in
+  total). The 95 MB full engine is cached at runtime, only after the user chose it.
+- **Updates wait for a click** (`registerType: 'prompt'`): reloading by itself could cut a training
+  line or an analysis short.
+- **Icons are drawn by a script** (`scripts/build-icons.mjs`) from the favicon's straight-line shapes
+  with 4×4 supersampling and a tiny PNG writer, so no image library or tool is needed and they can be
+  rebuilt. Checked against the browser's rendering of `favicon.svg`.
+- **Relative `start_url` and `scope`**, so the same build works at the root and under a sub-path.

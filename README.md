@@ -79,6 +79,13 @@ API token (no permissions), kept in this browser.
 Only the players, result, date and first 40 moves of each game are kept, in this browser. Only
 standard chess is supported; see `docs/OPENING_TRAINER.md` for what comes next.
 
+## Install and offline use
+
+Chess on the Fly can be installed as an app (**Install** in the header in Chrome and Edge; Share → Add
+to Home Screen in Safari) and works offline after the first visit: the app, your repertoires and
+training, PGN import, opening names and the lite engine. Fetching games, importing Lichess studies and
+the opening explorer need a connection. A new version waits for you to click **Reload**.
+
 ## Languages
 
 English and Persian (right-to-left). Pick one in the header menu; the choice is kept in

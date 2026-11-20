@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "typecheck": "tsc -b",
-    "build:openings": "node scripts/build-openings.mjs"
+    "build:openings": "node scripts/build-openings.mjs",
+    "build:icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {
     "chess.js": "^1.4.0",
@@ -41,6 +42,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
     "vite": "^8.3.6",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^5.1.0"
   }
 }

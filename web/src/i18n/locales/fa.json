@@ -691,5 +691,10 @@
   "explorer.error.data": "اکسپلورر پاسخ غیرمنتظره‌ای فرستاد.",
   "games.openings": "گشایش‌های شما",
   "games.opening": "گشایش",
-  "games.showAll": "نمایش هر {n} مورد"
+  "games.showAll": "نمایش هر {n} مورد",
+  "pwa.update": "نسخهٔ تازه‌ای از Chess on the Fly آماده است.",
+  "pwa.reload": "بارگذاری دوباره",
+  "pwa.offline": "آمادهٔ کار بدون اینترنت.",
+  "pwa.install": "نصب",
+  "pwa.installHelp": "Chess on the Fly را به‌صورت برنامه روی این دستگاه نصب کنید. پس از آن بدون اینترنت هم کار می‌کند."
 }

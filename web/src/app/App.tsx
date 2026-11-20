@@ -15,6 +15,7 @@ import { clearDeepLink, importLichessGame, invalidDeepLinkReason, lichessGameRec
 import { ImportError } from '../features/import/http';
 import { About, Disclaimer } from './About';
 import { LanguageSelect, useT } from '../i18n/react';
+import { AppUpdate, InstallButton } from './AppUpdate';
 import { Icon } from '../components/Icon';
 
 // Loaded on first visit to the Openings tab, so the analyser does not download chessops.
@@ -142,8 +143,10 @@ function Shell() {
         </nav>
         <span className="spacer" />
         <span className="small muted hide-mobile">{t('app.tagline')}</span>
+        <InstallButton />
         <LanguageSelect className="lang-select" />
       </header>
+      <AppUpdate />
       <main>
         {route === 'analyse' && (
           <div className="layout">

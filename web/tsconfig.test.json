@@ -22,6 +22,7 @@
     "noEmit": true,
     "types": [
       "vite/client",
+      "vite-plugin-pwa/react",
       "node"
     ]
   },

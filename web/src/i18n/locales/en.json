@@ -691,5 +691,10 @@
   "explorer.error.data": "The explorer sent something unexpected.",
   "games.openings": "Your openings",
   "games.opening": "Opening",
-  "games.showAll": "Show all {n}"
+  "games.showAll": "Show all {n}",
+  "pwa.update": "A new version of Chess on the Fly is ready.",
+  "pwa.reload": "Reload",
+  "pwa.offline": "Ready to work offline.",
+  "pwa.install": "Install",
+  "pwa.installHelp": "Install Chess on the Fly as an app on this device. It then works offline too."
 }

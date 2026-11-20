@@ -166,6 +166,7 @@ function MistakeList({
                     ? t('train.mistakes.row', { wrong: m.wrong.join(', '), expected: m.expected.join(', ') })
                     : t('train.mistakes.rowShown', { expected: m.expected.join(', ') })}{' '}
                   · {tn('train.mistakes.times', m.times)}
+                  {m.inGames > 0 && ` · ${tn('train.mistakes.inGames', m.inGames)}`}
                 </span>
               </div>
               <button type="button" className="small" onClick={() => onPractise(m.posKey)}>

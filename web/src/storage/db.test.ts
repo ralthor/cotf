@@ -121,3 +121,29 @@ describe('backupStore', () => {
     expect(await trainStore.log('r1')).toHaveLength(1);
   });
 });
+
+describe('openingGameStore and game mistakes', () => {
+  it('keeps the newest games and logs each game mistake once', async () => {
+    const { openingGameStore, trainStore, MAX_OPENING_GAMES } = await import('./db');
+    const game = (i: number) => ({
+      id: `g${i}`,
+      source: 'lichess' as const,
+      white: 'me',
+      black: 'x',
+      userColour: 'w' as const,
+      result: '1-0' as const,
+      playedAt: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString(),
+      moves: [],
+    });
+    await openingGameStore.putMany(Array.from({ length: MAX_OPENING_GAMES + 3 }, (_, i) => game(i)));
+    const list = await openingGameStore.list();
+    expect(list).toHaveLength(MAX_OPENING_GAMES);
+    expect(list[0]!.id).toBe(`g${MAX_OPENING_GAMES + 2}`);
+    expect(list.some((g) => g.id === 'g0')).toBe(false);
+
+    const entry = { repertoireId: 'r1', side: 'w' as const, posKey: 'k', at: now, mode: 'game' as const, result: 'wrong' as const, wrong: ['Bc4'], expected: ['Bb5'], ms: 0, gameId: 'g5' };
+    expect(await trainStore.addGameMistakes([entry, { ...entry, gameId: 'g6' }])).toBe(2);
+    expect(await trainStore.addGameMistakes([entry])).toBe(0);
+    expect(await trainStore.log('r1')).toHaveLength(2);
+  });
+});

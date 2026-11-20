@@ -63,7 +63,8 @@ export function computeStats(
   now = new Date(),
 ): Stats {
   const inScope = new Set(positions);
-  const entries = log.filter((e) => inScope.has(e.posKey)).sort((a, b) => a.at.localeCompare(b.at));
+  // Mistakes found in games are not training answers.
+  const entries = log.filter((e) => inScope.has(e.posKey) && e.mode !== 'game').sort((a, b) => a.at.localeCompare(b.at));
 
   let learnt = 0;
   let mastered = 0;

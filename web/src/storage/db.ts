@@ -6,6 +6,8 @@ import type { GameAnalysis } from '../features/analysis/types';
 import type { Chapter, PosKey, RepMove, Repertoire, Side, TrainCard, TrainLogEntry } from '../core/repertoire/types';
 import { buildMoves } from '../core/repertoire/graph';
 import { logKey, type BackupData } from '../core/repertoire/backup';
+import type { OpeningGame } from '../core/repertoire/games';
+import type { MoveGrade } from '../features/explore/grade';
 
 interface AnalyserDB extends DBSchema {
   games: { key: string; value: GameRecord; indexes: { importedAt: string } };
@@ -23,10 +25,15 @@ interface AnalyserDB extends DBSchema {
   // Version 3: training.
   trainCards: { key: [string, Side, PosKey]; value: TrainCard; indexes: { repertoireId: string } };
   trainLog: { key: number; value: TrainLogEntry; indexes: { repertoireId: string } };
+  // Version 4: your games against your repertoire.
+  openingGames: { key: string; value: OpeningGame; indexes: { playedAt: string } };
+  moveGrades: { key: string; value: MoveGrade };
 }
 
 export const DB_NAME = 'chess-analyser';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+/** Games kept for the repertoire comparison; the oldest are dropped. */
+export const MAX_OPENING_GAMES = 2000;
 const MAX_GAMES = 500;
 
 let dbPromise: Promise<IDBPDatabase<AnalyserDB> | null> | null = null;
@@ -55,6 +62,10 @@ export function getDb(): Promise<IDBPDatabase<AnalyserDB> | null> {
         if (oldVersion < 3) {
           db.createObjectStore('trainCards', { keyPath: ['repertoireId', 'side', 'posKey'] }).createIndex('repertoireId', 'repertoireId');
           db.createObjectStore('trainLog', { keyPath: 'id', autoIncrement: true }).createIndex('repertoireId', 'repertoireId');
+        }
+        if (oldVersion < 4) {
+          db.createObjectStore('openingGames', { keyPath: 'id' }).createIndex('playedAt', 'playedAt');
+          db.createObjectStore('moveGrades');
         }
       },
     }).catch(() => null);
@@ -234,6 +245,29 @@ export const trainStore = {
     const db = await getDb();
     return db ? db.count('trainCards') : 0;
   },
+  /**
+   * Logs mistakes found in games (mode `game`), skipping games already logged for the same
+   * repertoire, side and position. Returns how many were added.
+   */
+  async addGameMistakes(entries: readonly TrainLogEntry[]): Promise<number> {
+    const db = await getDb();
+    if (!db || !entries.length) return 0;
+    const tx = db.transaction('trainLog', 'readwrite');
+    const seen = new Set<string>();
+    for (const id of new Set(entries.map((e) => e.repertoireId))) {
+      for (const e of await tx.store.index('repertoireId').getAll(id)) if (e.gameId) seen.add(`${e.repertoireId}|${e.side}|${e.posKey}|${e.gameId}`);
+    }
+    let added = 0;
+    for (const e of entries) {
+      const k = `${e.repertoireId}|${e.side}|${e.posKey}|${e.gameId}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      await tx.store.add(e);
+      added++;
+    }
+    await tx.done;
+    return added;
+  },
   async log(repertoireId: string): Promise<TrainLogEntry[]> {
     const db = await getDb();
     return db ? db.getAllFromIndex('trainLog', 'repertoireId', repertoireId) : [];
@@ -286,5 +320,49 @@ export const backupStore = {
       await tx.objectStore('trainLog').add(e);
     }
     await tx.done;
+  },
+};
+
+export const openingGameStore = {
+  /** Newest first. */
+  async list(): Promise<OpeningGame[]> {
+    const db = await getDb();
+    return db ? (await db.getAllFromIndex('openingGames', 'playedAt')).reverse() : [];
+  },
+  /** Adds or replaces games, then drops the oldest beyond MAX_OPENING_GAMES. */
+  async putMany(games: readonly OpeningGame[]): Promise<void> {
+    const db = await getDb();
+    if (!db) return;
+    const tx = db.transaction('openingGames', 'readwrite');
+    for (const g of games) await tx.store.put(g);
+    let extra = (await tx.store.count()) - MAX_OPENING_GAMES;
+    let cursor = extra > 0 ? await tx.store.index('playedAt').openCursor() : null;
+    while (cursor && extra-- > 0) {
+      await cursor.delete();
+      cursor = await cursor.continue();
+    }
+    await tx.done;
+  },
+  async clear(): Promise<void> {
+    const db = await getDb();
+    await db?.clear('openingGames');
+  },
+};
+
+export const moveGradeStore = {
+  async getAll(keys: readonly string[]): Promise<Map<string, MoveGrade>> {
+    const db = await getDb();
+    const out = new Map<string, MoveGrade>();
+    if (!db) return out;
+    const tx = db.transaction('moveGrades');
+    for (const k of keys) {
+      const v = await tx.store.get(k);
+      if (v) out.set(k, v);
+    }
+    return out;
+  },
+  async put(key: string, grade: MoveGrade): Promise<void> {
+    const db = await getDb();
+    await db?.put('moveGrades', grade, key);
   },
 };

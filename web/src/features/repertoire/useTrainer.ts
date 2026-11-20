@@ -175,7 +175,7 @@ function play(s: Session, ctx: Ctx, m: RepMove): Session {
 
 export type TrainerCounts = { cards: number; fresh: number; due: number; weak: number; nextDue: Date | null };
 
-export type Mistake = { posKey: PosKey; times: number; lastAt: string; wrong: string[]; expected: string[] };
+export type Mistake = { posKey: PosKey; times: number; lastAt: string; wrong: string[]; expected: string[]; inGames: number };
 
 /**
  * Training state for one repertoire and side: FSRS cards and the answer log from IndexedDB, and
@@ -246,8 +246,9 @@ export function useTrainer(repertoireId: string | null, chapters: readonly Chapt
     const by = new Map<PosKey, Mistake>();
     for (const e of log) {
       if ((e.result !== 'wrong' && e.result !== 'shown') || !inScope.has(e.posKey)) continue;
-      const m = by.get(e.posKey) ?? { posKey: e.posKey, times: 0, lastAt: e.at, wrong: [], expected: e.expected };
+      const m = by.get(e.posKey) ?? { posKey: e.posKey, times: 0, lastAt: e.at, wrong: [], expected: e.expected, inGames: 0 };
       m.times++;
+      if (e.mode === 'game') m.inGames++;
       if (e.at >= m.lastAt) [m.lastAt, m.expected] = [e.at, e.expected];
       for (const w of e.wrong) if (!m.wrong.includes(w)) m.wrong.push(w);
       by.set(e.posKey, m);

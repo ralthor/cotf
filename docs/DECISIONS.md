@@ -257,3 +257,26 @@ Plan: `OPENING_TRAINER_PHASE3.md`.
   and analyses are a cache.
 - **Reminder**: shown when there are training cards and the last downloaded backup is older than 7
   days (or there is none). The date of the last download is a localStorage preference.
+
+## Your games and your repertoire (phase 4, 20 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE4.md`.
+
+- **Games are trimmed and kept apart** from the Analyse tab's game list (`openingGames`, IndexedDB
+  version 4): players, result, date, time control and the first 80 plies, up to 2,000 games. Fetching
+  hundreds of games must not fill the analyser's list (capped at 500).
+- **The comparison is by position key**, on the side the user played, and stops at the first move
+  outside the repertoire. Moves are replayed with chessops from the SAN and compared as standard UCI.
+- **Engine checks are on request** ("Check with engine", depth 14, the shown rows only) and cached by
+  `fen|uci` in `moveGrades`. Playable = the move classifier's `good` or better (`GOOD_ENOUGH`), the
+  same rule as practising mistakes in the Analyse tab.
+- **Game mistakes go into the training log** (mode `game`, one per game and position), so Train →
+  Mistakes and Review pick them up with no new queue. They are not training answers: statistics
+  leave them out.
+- **Results by chapter** count a game once only one chapter fits it and both sides played at least
+  one repertoire move; a game that left on move 1 says nothing about a chapter.
+- **Discovery** builds the repertoire as a move trie from the games (not by position), so the PGN keeps
+  move orders; it is imported through the normal PGN import as a new repertoire. Comments are written
+  in the current language.
+- Adding an opponent's move to a chapter from this screen needs a chapter editor; for now *Prepare*
+  opens the position on Lichess.

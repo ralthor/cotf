@@ -59,8 +59,17 @@ records, progress per chapter, and the hardest positions with a button to practi
 and restores it here or on another device. It reminds you when you have training progress and no
 backup from the last 7 days.
 
-Only standard chess is supported. Checking your own games against the repertoire comes in a later
-phase; see `docs/OPENING_TRAINER.md`.
+**Games** (the fourth sub-tab) fetches your recent Chess.com and Lichess games and compares them with
+the selected repertoire:
+
+- where you left the repertoire, checked with the engine: a playable move is not a mistake; the
+  mistakes can be added to Train → Mistakes and Review, or practised right away;
+- where your opponents left it: moves your repertoire has no answer to, with a link to prepare one;
+- results per chapter (score, wins, draws, losses, moves in book);
+- **Start from your games**: a new repertoire from the moves you play most.
+
+Only the players, result, date and first 40 moves of each game are kept, in this browser. Only
+standard chess is supported; see `docs/OPENING_TRAINER.md` for what comes next.
 
 ## Languages
 

@@ -43,7 +43,7 @@ function chapterTitle(h: Record<string, string>): string | null {
 }
 
 /** Standard UCI for a chessops move (chessops writes castling as king-takes-rook, e1h1). */
-function standardUci(pos: Position, move: Parameters<typeof castlingSide>[1]): string {
+export function standardUci(pos: Position, move: Parameters<typeof castlingSide>[1]): string {
   const side = castlingSide(pos, move);
   if (side && 'from' in move) return makeSquare(move.from) + makeSquare(kingCastlesTo(pos.turn, side));
   return makeUci(move);

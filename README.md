@@ -41,8 +41,18 @@ The **Openings** tab holds opening repertoires, kept in this browser like everyt
   through moves, ↑ ↓ between variations, Home / End, F to flip.
 - Download a chapter or a whole repertoire as PGN, with all annotations.
 
-Only standard chess is supported. Training (spaced repetition) comes in a later phase; see
-`docs/OPENING_TRAINER.md`.
+**Train** (the second sub-tab) quizzes you on a repertoire, or one chapter of it, as White or Black.
+The app plays your opponent's moves; you answer by dragging a piece or by tapping it and then its
+square.
+
+- **Learn**: new moves are shown with the chapter's comments, then you replay the line from memory.
+- **Memorise**: positions due for review (spaced repetition, FSRS); comments appear after you answer.
+- **Review**: positions you got wrong, one at a time.
+- Hints step by step (piece, square, arrow), or *Show move*. *No hints* turns them off.
+- **Mistakes** lists the positions you got wrong and what you played, with a button to practise each.
+
+Only standard chess is supported. Statistics, backups and checking your own games against the
+repertoire come in later phases; see `docs/OPENING_TRAINER.md`.
 
 ## Languages
 

@@ -72,3 +72,25 @@ describe('repertoireStore', () => {
     expect(await repertoireStore.chapters('r2')).toHaveLength(2);
   });
 });
+
+describe('trainStore', () => {
+  it('saves cards with their answers and deletes them with the repertoire', async () => {
+    const { trainStore } = await import('./db');
+    const { review } = await import('../core/repertoire/srs');
+    await repertoireStore.put({ id: 'r1', name: 'Italian', createdAt: now, updatedAt: now });
+    const srs = await review(undefined, 'good', new Date(now));
+    const entry = { repertoireId: 'r1', side: 'w' as const, posKey: 'k', at: now, mode: 'learn' as const, result: 'good' as const, wrong: [], expected: ['e4'], ms: 900 };
+    await trainStore.answer({ repertoireId: 'r1', side: 'w', posKey: 'k', srs }, entry);
+    await trainStore.answer(null, { ...entry, result: 'wrong', wrong: ['d4'] });
+
+    const cards = await trainStore.cards('r1', 'w');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.srs.dueAt).toBeInstanceOf(Date);
+    expect(await trainStore.cards('r1', 'b')).toEqual([]);
+    expect((await trainStore.log('r1')).map((e) => e.result)).toEqual(['good', 'wrong']);
+
+    await repertoireStore.remove('r1');
+    expect(await trainStore.cards('r1', 'w')).toEqual([]);
+    expect(await trainStore.log('r1')).toEqual([]);
+  });
+});

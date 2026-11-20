@@ -210,3 +210,28 @@ Plan: `OPENING_TRAINER_PHASE1.md`. Background: `OPENING_TRAINER.md`.
   `Access-Control-Allow-Origin: *`; a private or missing study is 404. The opening explorer
   (`explorer.lichess.ovh`) answers 401 without a token. Tested in the browser with a public 56-chapter
   study (414 arrows, 164 highlighted squares, nested variations): imported with no warnings.
+
+## Opening trainer (phase 2, 20 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE2.md`.
+
+- **ts-fsrs 6.0.0** (MIT), `DefaultScheduler` with FSRS-7 defaults and fuzzing. The v5-style
+  `fsrs()` / `createEmptyCard()` API is deprecated in v6, so it is not used. Cards are stored as
+  ts-fsrs returns them (with `Date` fields; IndexedDB keeps them as dates).
+- **One card per (repertoire, side, position)**, so a position reached by transposition or in two
+  chapters is learnt once. Cards for positions that leave the repertoire are kept but ignored.
+- **Grades**: right first time with no hint = Good, after a hint = Hard, a wrong move or *Show move* =
+  Again. Easy is never given automatically. Right answers on positions that are not due do not move
+  their card; failures always do.
+- **Lines are steered**: the opponent's reply is weighted by the positions needing training behind
+  it; where only some of your moves lead to such positions, those are asked for, and another
+  repertoire move gets a neutral "this line goes on with another move" instead of counting as wrong.
+- **Learn** shows at most 6 new moves per line, then replays the line from the start from memory;
+  only the replay is graded.
+- **Memorise and Review hide the opponent's last comment and arrows until you answer**: study
+  comments often name the next move.
+- **Click-to-move** on the training board as well as dragging: easier on phones, and lets automated
+  browser checks play moves.
+- **IndexedDB version 3** adds `trainCards` and `trainLog`; deleting a repertoire deletes both.
+- Moves outside the repertoire are wrong answers for now. Engine grading ("playable deviation")
+  waits for phase 4, where real games need it too.

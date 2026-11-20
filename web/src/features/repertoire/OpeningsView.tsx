@@ -6,6 +6,7 @@ import { getPref, setPref } from '../../storage/prefs';
 import { ChapterView } from './ChapterView';
 import { RepertoireImport } from './RepertoireImport';
 import { RepertoireList } from './RepertoireList';
+import { TrainerView } from './TrainerView';
 import { useRepertoires } from './useRepertoires';
 
 /** The Openings tab: repertoires and their chapters on the left, the open chapter on the right. */
@@ -17,6 +18,11 @@ export function OpeningsView() {
     setChapterIdState(id);
     setPref('openChapter', id);
   };
+  const [view, setViewState] = useState<'browse' | 'train'>(() => (getPref('openingsView') === 'train' ? 'train' : 'browse'));
+  const setView = (v: 'browse' | 'train') => {
+    setViewState(v);
+    setPref('openingsView', v);
+  };
   // Phones: the lists fold into a panel above the board (null = automatic).
   const [listOpen, setListOpen] = useState<boolean | null>(null);
   const chapterCol = useRef<HTMLDivElement>(null);
@@ -26,6 +32,7 @@ export function OpeningsView() {
 
   const openChapter = (id: string) => {
     setChapterId(id);
+    setView('browse');
     setListOpen(false);
     requestAnimationFrame(() => {
       const el = chapterCol.current;
@@ -68,7 +75,18 @@ export function OpeningsView() {
         <RepertoireImport repertoires={reps.repertoires} selectedId={reps.selected?.id ?? null} onImport={reps.importPgn} />
       </div>
       <div className="game-col" ref={chapterCol}>
-        {chapter ? (
+        {reps.repertoires.length > 0 && (
+          <div className="tabs openings-tabs" role="tablist" aria-label={t('nav.openings')}>
+            {(['browse', 'train'] as const).map((v) => (
+              <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}>
+                {t(`openings.${v}`)}
+              </button>
+            ))}
+          </div>
+        )}
+        {view === 'train' && reps.repertoires.length > 0 ? (
+          <TrainerView repertoire={reps.selected} chapters={reps.chapters} />
+        ) : chapter ? (
           <ChapterView key={`${chapter.id}|${chapter.importedAt}`} chapter={chapter} />
         ) : (
           <div className="panel">

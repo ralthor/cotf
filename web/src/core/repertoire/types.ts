@@ -81,3 +81,30 @@ export type RepMove = {
   /** Where the move appears: chapter and child-index path from the root. */
   refs: { chapterId: string; path: number[] }[];
 };
+
+export type TrainMode = 'learn' | 'memorise' | 'review';
+
+/** Spaced-repetition state of one card: a position where it is `side`'s move. */
+export type TrainCard = {
+  repertoireId: string;
+  side: Side;
+  posKey: PosKey;
+  srs: import('./srs').SrsCard;
+};
+
+/** One answered question, for the mistake list (and statistics later). */
+export type TrainLogEntry = {
+  id?: number;
+  repertoireId: string;
+  side: Side;
+  posKey: PosKey;
+  /** ISO time of the answer. */
+  at: string;
+  mode: TrainMode;
+  result: import('./srs').AnswerResult;
+  /** Wrong moves tried first (SAN). */
+  wrong: string[];
+  /** The repertoire's moves there (SAN). */
+  expected: string[];
+  ms: number;
+};

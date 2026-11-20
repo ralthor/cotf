@@ -1,6 +1,6 @@
 # Opening trainer: requirements review and approach
 
-Status: discussion, 20 Nov 2026. The phase 1 plan is in [OPENING_TRAINER_PHASE1.md](OPENING_TRAINER_PHASE1.md).
+Status: phases 1 and 2 implemented, 20 Nov 2026: [phase 1](OPENING_TRAINER_PHASE1.md), [phase 2](OPENING_TRAINER_PHASE2.md).
 The original requirements are copied at the end of this file.
 
 ## Summary
@@ -77,8 +77,8 @@ map onto card state:
 - **Review**: cards failed recently (lapses), as short exercises.
 
 Full-line training walks a path from the start position and grades every card on it. Position training
-asks single cards. FSRS grades come from the result: first try without hints = Good (Easy when fast),
-after a hint = Hard, wrong or shown = Again.
+asks single cards. FSRS grades come from the result: first try without hints = Good, after a hint =
+Hard, wrong or shown = Again (Easy is not given automatically; see phase 2).
 
 ### 5. Deviation vs mistake
 
@@ -129,7 +129,7 @@ Progressive, each step costing grade: the piece to move, then its square, then a
 1. **Repertoire core**: import (file, paste, Lichess study or chapter), position graph, viewer with
    comments, arrows and highlighted squares, several repertoires. → [phase 1 plan](OPENING_TRAINER_PHASE1.md)
 2. **Trainer**: pick a side, opponent moves played automatically, Learn / Memorise / Review, FSRS, hints,
-   mistake log.
+   mistake log. → [phase 2 plan](OPENING_TRAINER_PHASE2.md)
 3. **Progress and statistics** per repertoire, opening and position; JSON export and import.
 4. **Games and repertoire**: deviations, exercises from real games, discovery.
 5. **Opening names and ECO codes**; optional explorer statistics with a Lichess token.
@@ -138,7 +138,7 @@ Progressive, each step costing grade: the piece to move, then its square, then a
 
 ## Open questions
 
-Proposed defaults are in italics. Not decided yet.
+Proposed defaults are in italics. Phase 2 uses all three defaults.
 
 1. If the repertoire has two moves for you in one position, does either count as correct?
    *Yes, either is accepted. The lines after each are trained as separate paths.*

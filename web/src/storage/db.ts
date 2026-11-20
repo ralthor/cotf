@@ -3,7 +3,7 @@ import type { GameRecord } from '../core/chess/types';
 import type { PositionAnalysis } from '../core/engine/types';
 import type { AnalysisCache } from '../features/analysis/cache';
 import type { GameAnalysis } from '../features/analysis/types';
-import type { Chapter, PosKey, RepMove, Repertoire, Side } from '../core/repertoire/types';
+import type { Chapter, PosKey, RepMove, Repertoire, Side, TrainCard, TrainLogEntry } from '../core/repertoire/types';
 import { buildMoves } from '../core/repertoire/graph';
 
 interface AnalyserDB extends DBSchema {
@@ -19,10 +19,13 @@ interface AnalyserDB extends DBSchema {
     value: RepMove;
     indexes: { repertoireId: string; from: [string, Side, PosKey] };
   };
+  // Version 3: training.
+  trainCards: { key: [string, Side, PosKey]; value: TrainCard; indexes: { repertoireId: string } };
+  trainLog: { key: number; value: TrainLogEntry; indexes: { repertoireId: string } };
 }
 
 export const DB_NAME = 'chess-analyser';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const MAX_GAMES = 500;
 
 let dbPromise: Promise<IDBPDatabase<AnalyserDB> | null> | null = null;
@@ -47,6 +50,10 @@ export function getDb(): Promise<IDBPDatabase<AnalyserDB> | null> {
           const moves = db.createObjectStore('repMoves', { keyPath: ['repertoireId', 'side', 'from', 'uci'] });
           moves.createIndex('repertoireId', 'repertoireId');
           moves.createIndex('from', ['repertoireId', 'side', 'from']);
+        }
+        if (oldVersion < 3) {
+          db.createObjectStore('trainCards', { keyPath: ['repertoireId', 'side', 'posKey'] }).createIndex('repertoireId', 'repertoireId');
+          db.createObjectStore('trainLog', { keyPath: 'id', autoIncrement: true }).createIndex('repertoireId', 'repertoireId');
         }
       },
     }).catch(() => null);
@@ -148,13 +155,13 @@ export const repertoireStore = {
     const db = await getDb();
     await db?.put('repertoires', rep);
   },
-  /** Deletes a repertoire with its chapters and moves. */
+  /** Deletes a repertoire with its chapters, moves and training data. */
   async remove(id: string): Promise<void> {
     const db = await getDb();
     if (!db) return;
-    const tx = db.transaction(['repertoires', 'chapters', 'repMoves'], 'readwrite');
+    const tx = db.transaction(['repertoires', 'chapters', 'repMoves', 'trainCards', 'trainLog'], 'readwrite');
     await tx.objectStore('repertoires').delete(id);
-    for (const store of ['chapters', 'repMoves'] as const) {
+    for (const store of ['chapters', 'repMoves', 'trainCards', 'trainLog'] as const) {
       let cursor = await tx.objectStore(store).index('repertoireId').openCursor(id);
       while (cursor) {
         await cursor.delete();
@@ -203,5 +210,26 @@ export const repertoireStore = {
   async moves(repertoireId: string): Promise<RepMove[]> {
     const db = await getDb();
     return db ? db.getAllFromIndex('repMoves', 'repertoireId', repertoireId) : [];
+  },
+};
+
+export const trainStore = {
+  async cards(repertoireId: string, side: Side): Promise<TrainCard[]> {
+    const db = await getDb();
+    if (!db) return [];
+    return (await db.getAllFromIndex('trainCards', 'repertoireId', repertoireId)).filter((c) => c.side === side);
+  },
+  /** Saves a card's new state and the answer that led to it, together. */
+  async answer(card: TrainCard | null, entry: TrainLogEntry): Promise<void> {
+    const db = await getDb();
+    if (!db) return;
+    const tx = db.transaction(['trainCards', 'trainLog'], 'readwrite');
+    if (card) await tx.objectStore('trainCards').put(card);
+    await tx.objectStore('trainLog').add(entry);
+    await tx.done;
+  },
+  async log(repertoireId: string): Promise<TrainLogEntry[]> {
+    const db = await getDb();
+    return db ? db.getAllFromIndex('trainLog', 'repertoireId', repertoireId) : [];
   },
 };

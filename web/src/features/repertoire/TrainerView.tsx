@@ -341,6 +341,12 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
           )}
         </p>
       )}
+      {/* A chapter that starts mid-game (My fixes) says how you got there; this never names the answer. */}
+      {single && lineChapters[0]!.root.comments?.length ? (
+        <p className="small train-context" dir="auto">
+          {displayComments(lineChapters[0]!.root.comments).join(' ')}
+        </p>
+      ) : null}
       <div className="chapter-view">
         <div className="board-col">
           <div className="board-wrap" dir="ltr">

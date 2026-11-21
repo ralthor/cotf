@@ -10,6 +10,7 @@ import {
   type ImprovementRule,
   type PositionNode,
 } from '../../core/repertoire/insights';
+import type { DropLabel } from '../../core/repertoire/openingLoss';
 import type { Side } from '../../core/repertoire/types';
 import { explorerStore } from '../../storage/db';
 import { getPref, setPref } from '../../storage/prefs';
@@ -21,9 +22,15 @@ export type InsightFilters = {
   /** Last move number looked at. */
   maxMove: number;
   minGames: number;
+  /** Opening losses: how many of your most recent games to look at. */
+  scanGames: number;
+  /** Opening losses: the smallest drop listed. */
+  minDrop: DropLabel;
+  /** Opening losses: only games you did not win. */
+  notWon: boolean;
 };
 
-const DEFAULT_FILTERS: InsightFilters = { colour: '', timeClass: '', maxMove: 15, minGames: 3 };
+const DEFAULT_FILTERS: InsightFilters = { colour: '', timeClass: '', maxMove: 15, minGames: 3, scanGames: 100, minDrop: 'inaccuracy', notWon: false };
 /** Positions looked up in one scan, most played first. */
 export const MAX_LOOKUPS = 300;
 /** Time between two requests to the explorer, to stay well inside Lichess's limits. */
@@ -200,5 +207,26 @@ export function useInsights(games: readonly OpeningGame[]) {
   );
   const looked = points.filter((n) => lookups.has(urlOf(n))).length;
 
-  return { filters, setFilters, filtered, tree, spots, points, looked, improvements, lookupOf, lookupOne, improvementsOf, scan, startScan, stopScan, error, db, chooseDb, hasToken: !!token, lichessFilter, rule };
+  /** The database for any position: saved answer, else fetched now. `fetched` says whether Lichess was asked (for pacing). */
+  const lookupFen = useCallback(
+    async (fen: string): Promise<{ result: ExplorerResult; fetched: boolean } | null> => {
+      const url = explorerUrl(db, fen, lichessFilter);
+      const hit = lookups.get(url) ?? (await explorerStore.get(url));
+      if (hit) return { result: hit.result, fetched: false };
+      try {
+        const result = await explorer.get(db, fen, token, undefined, lichessFilter);
+        const at = await explorerStore.put(url, result);
+        setLookups((m) => new Map(m).set(url, { result, at }));
+        return { result, fetched: true };
+      } catch (e) {
+        setError(e instanceof ExplorerError ? e.code : 'network');
+        return null;
+      }
+    },
+    [db, lichessFilter, lookups, token],
+  );
+  /** The saved database answer for any position, if any. */
+  const cachedFen = useCallback((fen: string) => lookups.get(explorerUrl(db, fen, lichessFilter))?.result, [db, lichessFilter, lookups]);
+
+  return { filters, setFilters, filtered, tree, spots, points, looked, improvements, lookupOf, lookupOne, lookupFen, cachedFen, improvementsOf, scan, startScan, stopScan, error, db, chooseDb, hasToken: !!token, lichessFilter, rule };
 }

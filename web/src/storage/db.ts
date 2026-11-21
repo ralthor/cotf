@@ -9,6 +9,7 @@ import { logKey, type BackupData } from '../core/repertoire/backup';
 import type { OpeningGame } from '../core/repertoire/games';
 import type { MoveGrade } from '../features/explore/grade';
 import type { ExplorerResult } from '../features/repertoire/explorer';
+import type { CloudEval } from '../features/repertoire/cloudEval';
 
 interface AnalyserDB extends DBSchema {
   games: { key: string; value: GameRecord; indexes: { importedAt: string } };
@@ -31,10 +32,12 @@ interface AnalyserDB extends DBSchema {
   moveGrades: { key: string; value: MoveGrade };
   /** Opening explorer answers by request URL, with when they were fetched. */
   explorer: { key: string; value: { result: ExplorerResult; at: string } };
+  // Version 6: Lichess cloud evaluations by position key (null: not analysed on Lichess when asked).
+  cloudEvals: { key: string; value: { eval: CloudEval | null; at: string } };
 }
 
 export const DB_NAME = 'chess-analyser';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 /** Games kept for the repertoire comparison; the oldest are dropped. */
 export const MAX_OPENING_GAMES = 2000;
 const MAX_GAMES = 500;
@@ -72,6 +75,9 @@ export function getDb(): Promise<IDBPDatabase<AnalyserDB> | null> {
         }
         if (oldVersion < 5) {
           db.createObjectStore('explorer');
+        }
+        if (oldVersion < 6) {
+          db.createObjectStore('cloudEvals');
         }
       },
     }).catch(() => null);
@@ -388,5 +394,24 @@ export const explorerStore = {
   async clear(): Promise<void> {
     const db = await getDb();
     await db?.clear('explorer');
+  },
+};
+
+/** Lichess cloud evaluations, by position key. */
+export const cloudEvalStore = {
+  async getMany(keys: readonly string[]): Promise<Map<string, { eval: CloudEval | null; at: string }>> {
+    const out = new Map<string, { eval: CloudEval | null; at: string }>();
+    const db = await getDb();
+    if (!db) return out;
+    const tx = db.transaction('cloudEvals');
+    const got = await Promise.all(keys.map((k) => tx.store.get(k)));
+    keys.forEach((k, i) => got[i] && out.set(k, got[i]!));
+    return out;
+  },
+  async put(key: string, value: CloudEval | null): Promise<string> {
+    const at = new Date().toISOString();
+    const db = await getDb();
+    await db?.put('cloudEvals', { eval: value, at }, key);
+    return at;
   },
 };

@@ -345,3 +345,21 @@ Plan: `OPENING_TRAINER_PHASE8.md`.
 - **Phone layout:** the single column is `minmax(0, 1fr)` and wide tables scroll inside their own box,
   so no sub-tab makes the page wider than the screen (it did on all of them at 375 px).
 
+## Where your games went wrong, and training the fixes (phase 9, 21 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE9.md`.
+
+- **Results are not enough.** Weak spots come from results, so a game lost in the opening and won later
+  looks fine. Each game now gets its worst move in the opening from evaluations.
+- **Evaluations come from Lichess, not an engine on the device**: the game's own analysis when it was
+  analysed on Lichess, else Lichess cloud evaluations. They cover typical opening positions well
+  (24 of 24 and 20 of 22 in two test lines), cost no device time, and are kept per position.
+- **Two passes keep requests down**: first the positions after your moves, then only the position before
+  each game's worst move, which makes it exact and names the best move.
+- **Lichess's win-chance scale and labels** (−10% inaccuracy, −20% mistake, −30% blunder), so the numbers
+  match what Lichess shows for the same game.
+- **Fixes are ordinary repertoire chapters** starting at the position (PGN with `FEN`/`SetUp`), so
+  training, spaced repetition, progress and backup all work unchanged. The opponent's replies come from
+  the database, a few moves deep.
+- **"Not a problem" hides, it doesn't delete**: hidden findings can be shown and restored.
+- **Analyse can open at a move** (the open-game event carries a ply).

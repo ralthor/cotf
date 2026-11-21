@@ -47,6 +47,8 @@ function useBoardWidth() {
 
 export type GameViewProps = {
   game: GameRecord;
+  /** The position to show first (after this many moves); the start when absent. */
+  initialPly?: number;
   /** Extra actions (e.g. cloud analysis) rendered under the analysis controls. */
   renderExtra?: (ctx: { game: GameRecord; analysis: GameAnalysis | null; setAnalysis: (a: GameAnalysis) => void }) => ReactNode;
 };
@@ -61,11 +63,11 @@ const ARROW = {
   played: 'rgba(208,102,28,0.85)',
 };
 
-export function GameView({ game, renderExtra }: GameViewProps) {
+export function GameView({ game, initialPly, renderExtra }: GameViewProps) {
   const { t, locale } = useT();
   const positions = useMemo(() => positionsOf(game), [game]);
   // The parent keys this component by game id, so state resets when the game changes.
-  const [pos, setPos] = useState(0);
+  const [pos, setPos] = useState(() => Math.max(0, Math.min(positions.length - 1, initialPly ?? 0)));
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [filter, setFilter] = useState<MoveFilter>('all');
   const [pv, setPv] = useState<PvPreview | null>(null);

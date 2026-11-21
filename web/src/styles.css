@@ -519,6 +519,17 @@ button.choice-wrong { border-color: var(--cat-mistake); background: color-mix(in
 .move-chip { text-decoration: none; padding: 0 2px; margin-inline-end: 3px; color: inherit; }
 .move-chip.current { background: var(--accent); color: var(--accent-text); border-radius: 3px; }
 .move-chip:disabled { opacity: 1; cursor: default; }
+.games-table tr.has-detail td { border-bottom: none; }
+.games-table tr.detail-row td { padding-top: 0; color: var(--muted); white-space: normal; max-width: 60em; }
+.games-table tr.has-detail:hover + tr.detail-row,
+.games-table tr.detail-row:hover { background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
+.player-nav { justify-content: center; gap: 6px; }
+.legend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; }
+.player-moves { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 2px 0; max-height: 14em; overflow-y: auto; }
+.player-moves li.white-move { margin-inline-start: 6px; }
+.player-moves li .muted { margin-inline-end: 2px; }
+.train-context { margin: 0; color: var(--muted); }
 /* Five sub-tabs can be wider than a phone: let the row scroll instead of the page. */
 .openings-tabs { overflow-x: auto; scrollbar-width: none; }
 .openings-tabs button { flex: none; white-space: nowrap; }

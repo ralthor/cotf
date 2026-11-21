@@ -1,7 +1,7 @@
 import { Chess } from 'chessops/chess';
 import { makeFen } from 'chessops/fen';
 import { parseSan } from 'chessops/san';
-import { useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { openInAnalyse } from '../../app/openGame';
 import { lichessAnalysisUrl } from '../../core/chess/links';
@@ -22,8 +22,17 @@ import {
   type NextMove,
   type PositionNode,
   type WeakSpot,
+  walkGame,
 } from '../../core/repertoire/insights';
+import { DROP, dropLabel, winFor, type DropLabel, type LossMove, type OpeningLoss } from '../../core/repertoire/openingLoss';
 import type { Side } from '../../core/repertoire/types';
+import type { EngineScore } from '../../core/engine/types';
+import { formatScore } from '../../core/scoring/score';
+import { getPref, setPref } from '../../storage/prefs';
+import { afterUci, fixPgn, growReplies, keyOfFen, linePly, MAX_FIX_LOOKUPS, sanOf, type Fix } from './fixes';
+import { GamePlayer } from './GamePlayer';
+import { PACE_MS } from './paced';
+import { useOpeningLosses } from './useOpeningLosses';
 import { getLocale, t, tn } from '../../i18n';
 import { useT } from '../../i18n/react';
 import { useOpeningGames } from './useOpeningGames';
@@ -41,7 +50,7 @@ const moveNo = (n: PositionNode) => Math.ceil(n.ply / 2) || 1;
 type Column<T> = { key: string; label: string; title?: string; sort: (r: T) => number | string; cell: (r: T) => ReactNode };
 
 /** A table sorted by any column; clicking a header sorts by it, again reverses. */
-function SortTable<T>({ rows, columns, initial, rowKey, onOpen, label }: { rows: readonly T[]; columns: Column<T>[]; initial: string; rowKey: (r: T) => string; onOpen: (r: T) => void; label: string }) {
+function SortTable<T>({ rows, columns, initial, rowKey, onOpen, label, detail }: { rows: readonly T[]; columns: Column<T>[]; initial: string; rowKey: (r: T) => string; onOpen: (r: T) => void; label: string; detail?: (r: T) => ReactNode }) {
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: initial, desc: true });
   const [shown, setShown] = useState(PAGE);
   const sorted = useMemo(() => {
@@ -72,11 +81,20 @@ function SortTable<T>({ rows, columns, initial, rowKey, onOpen, label }: { rows:
           </thead>
           <tbody>
             {sorted.slice(0, shown).map((r) => (
-              <tr key={rowKey(r)} className="clickable" onClick={() => onOpen(r)}>
-                {columns.map((c) => (
-                  <td key={c.key}>{c.cell(r)}</td>
-                ))}
-              </tr>
+              <Fragment key={rowKey(r)}>
+                <tr className={`clickable${detail ? ' has-detail' : ''}`} onClick={() => onOpen(r)}>
+                  {columns.map((c) => (
+                    <td key={c.key}>{c.cell(r)}</td>
+                  ))}
+                </tr>
+                {detail && (
+                  <tr className="clickable detail-row" onClick={() => onOpen(r)}>
+                    <td colSpan={columns.length} className="small">
+                      {detail(r)}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -112,26 +130,164 @@ function spotColumns(): Column<WeakSpot>[] {
   ];
 }
 
-function improvementColumns(): Column<Improvement>[] {
+/** Hides a finding ("Not a problem"); the button does not open the row. */
+const hideCell = (onHide: () => void) => (
+  <button
+    type="button"
+    className="link small nowrap"
+    title={t('insights.hideHelp')}
+    onClick={(e) => {
+      e.stopPropagation();
+      onHide();
+    }}
+  >
+    {t('insights.hide')}
+  </button>
+);
+
+const evalText = (s: EngineScore | undefined) => (s ? formatScore(s) : '—');
+
+function improvementColumns(evalAfter: (n: PositionNode, uci: string) => EngineScore | undefined, onHide: (r: Improvement) => void): Column<Improvement>[] {
+  const yourDb = (r: Improvement) => r.yoursDb?.score ?? -1;
   return [
     { key: 'move', label: t('insights.col.move'), sort: (r) => r.node.ply, cell: (r) => moveNo(r.node) },
     { key: 'position', label: t('insights.col.position'), sort: (r) => orderLine(r.node.orders[0]?.sans ?? []), cell: (r) => lineCell(r.node) },
     { key: 'reached', label: t('insights.col.reached'), title: t('insights.col.reachedHelp'), sort: (r) => r.reached, cell: (r) => `${pct(r.reached)} (${r.node.outcome.games})` },
-    { key: 'lost', label: t('insights.col.lostWith'), sort: (r) => r.lost, cell: (r) => `${pct(r.lost)} (${r.yours.outcome.games})` },
+    { key: 'yours', label: t('insights.col.yourMove'), sort: (r) => r.yours.outcome.games, cell: (r) => <span dir="ltr">{r.yours.san} <span className="small muted">×{r.yours.outcome.games}</span></span> },
+    { key: 'yourScore', label: t('insights.col.yourScore'), title: t('insights.col.yourScoreHelp'), sort: (r) => scoreOf(r.yours.outcome), cell: (r) => pct(scoreOf(r.yours.outcome)) },
+    { key: 'lost', label: t('insights.col.lostWith'), sort: (r) => r.lost, cell: (r) => pct(r.lost) },
+    { key: 'dbYours', label: t('insights.col.dbYours'), title: t('insights.col.dbYoursHelp'), sort: yourDb, cell: (r) => (r.yoursDb ? pct(r.yoursDb.score) : <span className="muted" title={t('insights.col.rareHelp')}>{t('insights.col.rare')}</span>) },
+    { key: 'better', label: t('insights.col.better'), sort: (r) => r.better.san, cell: (r) => <strong dir="ltr">{r.better.san}</strong> },
+    { key: 'dbBetter', label: t('insights.col.dbBetter'), sort: (r) => r.better.score, cell: (r) => pct(r.better.score) },
+    { key: 'gain', label: t('insights.col.gain'), title: t('insights.col.gainHelp'), sort: (r) => r.gain, cell: (r) => `+${pct(r.gain)}` },
+    { key: 'points', label: t('insights.col.pointsToGain'), title: t('insights.col.pointsToGainHelp'), sort: (r) => r.pointsToGain, cell: (r) => num1(r.pointsToGain) },
     {
-      key: 'change',
-      label: t('insights.col.change'),
-      sort: (r) => r.yours.san,
+      key: 'engine',
+      label: t('insights.col.engine'),
+      title: t('insights.col.engineHelp'),
+      sort: (r) => {
+        const a = evalAfter(r.node, r.yours.uci);
+        const b = evalAfter(r.node, r.better.uci);
+        return a && b ? winFor(b, r.node.colour) - winFor(a, r.node.colour) : -2;
+      },
+      cell: (r) => {
+        const chances = (s: EngineScore | undefined) => (s ? pct(winFor(s, r.node.colour)) : '—');
+        const a = evalAfter(r.node, r.yours.uci);
+        const b = evalAfter(r.node, r.better.uci);
+        return (
+          <span dir="ltr" className="nowrap" title={`${evalText(a)} → ${evalText(b)}`}>
+            {chances(a)} → {chances(b)}
+          </span>
+        );
+      },
+    },
+    { key: 'hide', label: '', sort: () => 0, cell: (r) => hideCell(() => onHide(r)) },
+  ];
+}
+
+const improvementSentence = (imp: Improvement) =>
+  t(imp.basis === 'database' ? 'insights.suggestDb' : 'insights.suggestYours', {
+    games: tn('insights.nGames', imp.yours.outcome.games),
+    yours: imp.yours.san,
+    better: imp.better.san,
+    yourScore: pct(imp.basis === 'database' ? imp.yoursDb!.score : scoreOf(imp.yours.outcome)),
+    betterScore: pct(imp.better.score),
+    gain: pct(imp.gain),
+    points: num1(imp.pointsToGain),
+  });
+
+type LossRow = OpeningLoss & { worst: LossMove };
+
+const fenBefore = (l: LossRow) => walkGame(l.game).fens[l.worst.ply - 1]!;
+const bestSan = (l: LossRow) => (l.worst.best ? sanOf(fenBefore(l), l.worst.best) : null);
+
+function lossColumns(onHide: (r: LossRow) => void, askedBefore: (r: LossRow) => boolean): Column<LossRow>[] {
+  const date = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium' });
+  return [
+    { key: 'date', label: t('insights.g.date'), sort: (r) => r.game.playedAt, cell: (r) => <span className="nowrap">{date.format(new Date(r.game.playedAt))}</span> },
+    {
+      key: 'opponent',
+      label: t('insights.g.opponent'),
+      sort: (r) => r.game.opponentRating ?? 0,
       cell: (r) => (
-        <span dir="ltr">
-          {r.yours.san} → <strong>{r.better.san}</strong>
+        <span>
+          <bdi>{r.game.userColour === 'w' ? r.game.black : r.game.white}</bdi>
+          {r.game.opponentRating ? ` (${r.game.opponentRating})` : ''}
+          <br />
+          <span className="small muted">
+            {sideName(r.game.userColour)} · {r.game.timeClass ?? ''}
+          </span>
         </span>
       ),
     },
-    { key: 'gain', label: t('insights.col.gain'), title: t('insights.col.gainHelp'), sort: (r) => r.gain, cell: (r) => `+${pct(r.gain)}` },
-    { key: 'points', label: t('insights.col.pointsToGain'), title: t('insights.col.pointsToGainHelp'), sort: (r) => r.pointsToGain, cell: (r) => num1(r.pointsToGain) },
+    {
+      key: 'result',
+      label: t('insights.result'),
+      sort: (r) => userScore(r.game) ?? 0,
+      cell: (r) => {
+        const x = resultOf(r.game);
+        return <span className={x === 'won' ? 'good-text' : x === 'lost' ? 'bad-text' : ''}>{t(`insights.${x}`)}</span>;
+      },
+    },
+    {
+      key: 'move',
+      label: t('loss.col.move'),
+      sort: (r) => r.worst.ply,
+      cell: (r) => {
+        const l = dropLabel(r.worst.drop);
+        return (
+          <span dir="ltr" className="nowrap">
+            <strong>{moveLabel(r.worst.ply, r.worst.san)}</strong>
+            {l ? <span className={l === 'inaccuracy' ? '' : 'bad-text'}> {LOSS_SUFFIX[l]}</span> : null}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'chances',
+      label: t('loss.col.chances'),
+      title: t('loss.col.chancesHelp'),
+      sort: (r) => r.worst.afterWin,
+      cell: (r) => (
+        <span dir="ltr" className="nowrap">
+          {pct(r.worst.beforeWin)} → {pct(r.worst.afterWin)}
+          <br />
+          <span className="small muted">
+            {formatScore(r.worst.before)} → {formatScore(r.worst.after)}
+          </span>
+        </span>
+      ),
+    },
+    { key: 'drop', label: t('loss.col.drop'), title: t('loss.col.dropHelp'), sort: (r) => r.worst.drop, cell: (r) => <strong>−{pct(r.worst.drop)}</strong> },
+    {
+      key: 'best',
+      label: t('loss.col.best'),
+      sort: (r) => bestSan(r) ?? '',
+      cell: (r) => (
+        <span dir="ltr">
+          {bestSan(r) ?? (askedBefore(r) ? <span className="muted" title={t('loss.col.bestNone')}>—</span> : <span className="muted" title={t('loss.col.bestUnknown')}>?</span>)}
+        </span>
+      ),
+    },
+    { key: 'end', label: t('loss.col.end'), title: t('loss.col.endHelp'), sort: (r) => r.end?.win ?? 0, cell: (r) => (r.end ? pct(r.end.win) : '—') },
+    { key: 'hide', label: '', sort: () => 0, cell: (r) => hideCell(() => onHide(r)) },
   ];
 }
+
+const LOSS_SUFFIX: Record<DropLabel, string> = { inaccuracy: '?!', mistake: '?', blunder: '??' };
+
+const lossSentence = (r: LossRow) => {
+  const best = bestSan(r);
+  const l = dropLabel(r.worst.drop);
+  return [
+    t('loss.sentence', { move: moveLabel(r.worst.ply, r.worst.san), before: pct(r.worst.beforeWin), after: pct(r.worst.afterWin), label: l ? t(`loss.${l}`) : t('loss.small') }),
+    r.worst.beforePly !== r.worst.ply - 1 ? t('loss.twoPlies') : '',
+    best ? t('loss.bestWas', { best }) : '',
+    r.end ? t('loss.endAt', { move: Math.ceil(r.end.ply / 2) || 1, win: pct(r.end.win) }) : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+};
 
 const resultOf = (g: OpeningGame) => {
   const s = userScore(g);
@@ -144,7 +300,7 @@ function openGame(g: OpeningGame) {
 }
 
 /** The games behind a position, filterable by move order and result. */
-export function GamesList({ node, tree }: { node: PositionNode; tree: GamesTree }) {
+export function GamesList({ node, tree, onPlay }: { node: PositionNode; tree: GamesTree; onPlay?: (g: OpeningGame) => void }) {
   const [order, setOrder] = useState(-1);
   const [result, setResult] = useState('');
   const [shown, setShown] = useState(GAME_PAGE);
@@ -217,6 +373,14 @@ export function GamesList({ node, tree }: { node: PositionNode; tree: GamesTree 
                   <td>{g.timeClass ?? ''}</td>
                   <td>#{(orderOf.get(g.id) ?? 0) + 1}</td>
                   <td className="nowrap">
+                    {onPlay && (
+                      <>
+                        <button type="button" className="link" onClick={() => onPlay(g)}>
+                          {t('insights.play')}
+                        </button>
+                        {' · '}
+                      </>
+                    )}
                     {g.url && (
                       <a href={g.url} target="_blank" rel="noreferrer noopener">
                         {g.source === 'lichess' ? 'Lichess' : 'Chess.com'} ↗
@@ -350,7 +514,23 @@ export function NextTable({ node, onPick }: { node: PositionNode; onPick: (m: Ne
 }
 
 /** Everything behind one position: the numbers, move orders, next moves, database and games. */
-function PositionDetail({ node, ins, onOpen, onBack }: { node: PositionNode; ins: ReturnType<typeof useInsights>; onOpen: (id: string) => void; onBack: () => void }) {
+function PositionDetail({
+  node,
+  ins,
+  onOpen,
+  onBack,
+  onPlay,
+  onAddFix,
+  fixBusy,
+}: {
+  node: PositionNode;
+  ins: ReturnType<typeof useInsights>;
+  onOpen: (id: string) => void;
+  onBack: () => void;
+  onPlay: (g: OpeningGame) => void;
+  onAddFix: (imp: Improvement) => void;
+  fixBusy: boolean;
+}) {
   const tree = ins.tree;
   // The move order played out on the board: [order, plies shown].
   const [step, setStep] = useState<{ order: number; ply: number } | null>(null);
@@ -455,17 +635,14 @@ function PositionDetail({ node, ins, onOpen, onBack }: { node: PositionNode; ins
                   <p className="small muted">{t('insights.rule', { games: ins.rule.minDbGames, share: pct(ins.rule.minShare), gain: pct(ins.rule.minGain) })}</p>
                   {improvements.length ? (
                     improvements.map((imp) => (
-                      <p key={imp.yours.uci} className="practice-msg">
-                        {t(imp.basis === 'database' ? 'insights.suggestDb' : 'insights.suggestYours', {
-                          yours: imp.yours.san,
-                          better: imp.better.san,
-                          yourScore: pct(imp.basis === 'database' ? imp.yoursDb!.score : scoreOf(imp.yours.outcome)),
-                          betterScore: pct(imp.better.score),
-                          gain: pct(imp.gain),
-                          games: imp.yours.outcome.games,
-                          points: num1(imp.pointsToGain),
-                        })}
-                      </p>
+                      <div key={imp.yours.uci} className="stack">
+                        <p className="practice-msg">{improvementSentence(imp)}</p>
+                        <div>
+                          <button type="button" disabled={fixBusy} onClick={() => onAddFix(imp)}>
+                            {t('fixes.add', { san: imp.better.san })}
+                          </button>
+                        </div>
+                      </div>
                     ))
                   ) : (
                     <p className="small">{t('insights.noSuggestion')}</p>
@@ -498,22 +675,150 @@ function PositionDetail({ node, ins, onOpen, onBack }: { node: PositionNode; ins
       )}
 
       <div className="panel">
-        <GamesList key={node.id} node={node} tree={tree} />
+        <GamesList key={node.id} node={node} tree={tree} onPlay={onPlay} />
       </div>
     </div>
   );
 }
 
+type List = 'losses' | 'spots' | 'improve';
+type Hidden = ReadonlySet<string>;
+
+function readHidden(): Set<string> {
+  try {
+    return new Set(JSON.parse(getPref('insightsHidden') ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+const lossId = (r: { game: OpeningGame }) => `loss:${r.game.id}`;
+const impId = (r: Improvement) => `imp:${r.node.id}|${r.yours.uci}`;
+
+export type InsightsProps = {
+  onFetch: () => void;
+  /** Adds a one-chapter PGN to the "My fixes" repertoire. */
+  onAddFix: (pgn: string, colour: Side) => Promise<void>;
+  /** Opens training on "My fixes". */
+  onPractise: () => void;
+  /** Whether "My fixes" exists yet. */
+  hasFixes: boolean;
+};
+
+/** Building a fix: the database lookups for the replies, paced like the scans, then the import. */
+function useFixBuilder(ins: ReturnType<typeof useInsights>, onAddFix: InsightsProps['onAddFix']) {
+  const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
+  const live = useRef(true);
+  const build = useCallback(
+    async (fix: Fix) => {
+      setAdded(null);
+      setBusy({ done: 0, total: MAX_FIX_LOOKUPS });
+      let done = 0;
+      const lookup = async (fen: string) => {
+        const r = await ins.lookupFen(fen);
+        if (r?.fetched) await new Promise((res) => setTimeout(res, PACE_MS));
+        return r?.result ?? null;
+      };
+      try {
+        const afterBetter = afterUci(fix.fen, fix.better);
+        let replies = afterBetter ? await growReplies(afterBetter, fix.colour, lookup, ins.rule, 0, () => live.current && setBusy({ done: ++done, total: MAX_FIX_LOOKUPS })) : [];
+        // No database games this deep: follow the engine's line instead.
+        if (!replies.length && fix.line?.[0] === fix.better) replies = linePly(fix.fen, fix.line);
+        const title = t('fixes.title', { played: moveLabel(fix.reachedBy.length + 1, fix.played) });
+        await onAddFix(fixPgn(fix, replies, title), fix.colour);
+        if (live.current) setAdded(sanOf(fix.fen, fix.better));
+      } finally {
+        if (live.current) setBusy(null);
+      }
+    },
+    [ins, onAddFix],
+  );
+  return { busy, added, build };
+}
+
+/** What was just added to My fixes, with a way to train it now. */
+function FixStatus({ fb, onPractise }: { fb: ReturnType<typeof useFixBuilder>; onPractise: () => void }) {
+  if (fb.busy) return <p className="small">{t('fixes.building', { done: fb.busy.done, total: fb.busy.total })}</p>;
+  if (!fb.added) return null;
+  return (
+    <p className="practice-msg">
+      {t('fixes.added', { san: fb.added })}{' '}
+      <button type="button" className="link" onClick={onPractise}>
+        {t('fixes.practise')}
+      </button>
+    </p>
+  );
+}
+
 /** Weak spots and better moves from your own games, each with the games and move orders behind it. */
-export function InsightsView({ onFetch }: { onFetch: () => void }) {
+export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: InsightsProps) {
   useT();
   const og = useOpeningGames();
   const ins = useInsights(og.games);
-  const [list, setList] = useState<'spots' | 'improve'>('spots');
-  // The positions opened, so Back returns through them.
+  const f = ins.filters;
+  const losses = useOpeningLosses(ins.filtered, f.maxMove * 2, f.scanGames);
+  const fb = useFixBuilder(ins, onAddFix);
+  const [list, setListState] = useState<List>(() => {
+    const v = getPref('insightsList');
+    return v === 'spots' || v === 'improve' ? v : 'losses';
+  });
+  const setList = (v: List) => {
+    setListState(v);
+    setPref('insightsList', v);
+  };
+  const [hidden, setHiddenState] = useState<Hidden>(readHidden);
+  const [showHidden, setShowHidden] = useState(false);
+  const hide = useCallback((id: string) => {
+    setHiddenState((h) => {
+      const next = new Set(h);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      setPref('insightsHidden', next.size ? JSON.stringify([...next]) : null);
+      return next;
+    });
+  }, []);
+  // The positions opened, so Back returns through them; or a game in the player.
   const [path, setPath] = useState<string[]>([]);
+  const [player, setPlayer] = useState<{ gameId: string; ply: number } | null>(null);
+
+  const evalAfter = useCallback(
+    (n: PositionNode, uci: string) => {
+      const fen = afterUci(n.fen, uci);
+      if (!fen) return undefined;
+      return losses.cloud.get(keyOfFen(fen))?.score;
+    },
+    [losses.cloud],
+  );
   const spotCols = useMemo(() => spotColumns(), []);
-  const impCols = useMemo(() => improvementColumns(), []);
+  const impCols = useMemo(() => improvementColumns(evalAfter, (r) => hide(impId(r))), [evalAfter, hide]);
+  const askedBefore = useCallback((r: LossRow) => losses.cloud.has(keyOfFen(fenBefore(r))), [losses.cloud]);
+  const lossCols = useMemo(() => lossColumns((r) => hide(lossId(r)), askedBefore), [hide, askedBefore]);
+
+  const minDrop = DROP[f.minDrop];
+  const lossRows = useMemo(
+    () =>
+      losses.losses.filter(
+        (l): l is LossRow => !!l.worst && l.worst.drop >= minDrop && (!f.notWon || userScore(l.game) !== 1) && showHidden === hidden.has(lossId(l)),
+      ),
+    [losses.losses, minDrop, f.notWon, hidden, showHidden],
+  );
+  const hiddenLosses = losses.losses.filter((l) => hidden.has(lossId(l))).length;
+  const impRows = useMemo(() => ins.improvements.filter((r) => showHidden === hidden.has(impId(r))), [ins.improvements, hidden, showHidden]);
+  const hiddenImps = ins.improvements.length - ins.improvements.filter((r) => !hidden.has(impId(r))).length;
+
+  // Engine evaluations for the better-moves table: the position after your move and after the better one.
+  const impEvalTodo = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const r of ins.improvements) {
+      for (const u of [r.yours.uci, r.better.uci]) {
+        const fen = afterUci(r.node.fen, u);
+        const k = fen ? keyOfFen(fen) : '';
+        if (fen && k && !losses.cloud.has(k)) out.set(k, fen);
+      }
+    }
+    return [...out].map(([key, fen]) => ({ key, fen }));
+  }, [ins.improvements, losses.cloud]);
 
   if (!og.loaded) return null;
   if (!og.games.length) {
@@ -527,15 +832,59 @@ export function InsightsView({ onFetch }: { onFetch: () => void }) {
     );
   }
 
+  const dbName = ins.db === 'masters' ? t('insights.db.masters') : t('insights.db.lichess', { ratings: ins.lichessFilter.ratings.join(', '), speeds: ins.lichessFilter.speeds.join(', ') });
+  const playing = player ? ins.filtered.find((g) => g.id === player.gameId) ?? og.games.find((g) => g.id === player.gameId) : undefined;
+  if (player && playing) {
+    return (
+      <div className="stack">
+        <FixStatus fb={fb} onPractise={onPractise} />
+        <GamePlayer
+          key={`${player.gameId}@${player.ply}`}
+          game={playing}
+          startPly={player.ply}
+          maxPly={f.maxMove * 2}
+          losses={losses}
+          lookupFen={ins.lookupFen}
+          cachedFen={ins.cachedFen}
+          dbName={dbName}
+          rule={ins.rule}
+          fixBusy={!!fb.busy}
+          onAddFix={(fix) => void fb.build(fix)}
+          onBack={() => setPlayer(null)}
+        />
+      </div>
+    );
+  }
+
   const openId = path[path.length - 1];
   const open = openId ? ins.tree.nodes.get(openId) : undefined;
   if (open) {
-    return <PositionDetail key={open.id} node={open} ins={ins} onOpen={(id) => setPath((p) => [...p, id])} onBack={() => setPath((p) => p.slice(0, -1))} />;
+    return (
+      <div className="stack">
+        <FixStatus fb={fb} onPractise={onPractise} />
+        <PositionDetail
+          key={open.id}
+          node={open}
+          ins={ins}
+          onOpen={(id) => setPath((p) => [...p, id])}
+          onBack={() => setPath((p) => p.slice(0, -1))}
+          onPlay={(g) => setPlayer({ gameId: g.id, ply: open.ply })}
+          onAddFix={(imp) => void fb.build(improvementFix(imp))}
+          fixBusy={!!fb.busy}
+        />
+      </div>
+    );
   }
 
-  const f = ins.filters;
   const counted = ins.tree.totals.w + ins.tree.totals.b;
   const dbs: ExplorerDb[] = ['lichess', 'masters'];
+  const minutes = (n: number) => Math.max(1, Math.round((n * PACE_MS) / 60_000));
+  const hiddenToggle = (n: number) =>
+    (n > 0 || showHidden) && (
+      <button type="button" className="link small" onClick={() => setShowHidden((v) => !v)}>
+        {showHidden ? t('insights.showFindings') : tn('insights.showHidden', n)}
+      </button>
+    );
   return (
     <div className="stack">
       <section className="panel stack" aria-labelledby="insights-title">
@@ -565,23 +914,105 @@ export function InsightsView({ onFetch }: { onFetch: () => void }) {
             {t('insights.upToMove')}
             <input type="number" min={2} max={40} value={f.maxMove} onChange={(e) => ins.setFilters({ maxMove: Math.max(2, Math.min(40, Number(e.target.value) || 15)) })} />
           </label>
-          <label className="field-inline">
-            {t('insights.minGames')}
-            <input type="number" min={1} max={50} value={f.minGames} onChange={(e) => ins.setFilters({ minGames: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })} />
-          </label>
+          {list !== 'losses' && (
+            <label className="field-inline">
+              {t('insights.minGames')}
+              <input type="number" min={1} max={50} value={f.minGames} onChange={(e) => ins.setFilters({ minGames: Math.max(1, Math.min(50, Number(e.target.value) || 3)) })} />
+            </label>
+          )}
         </div>
         <p className="small muted">{t('insights.counted', { n: counted, w: ins.tree.totals.w, b: ins.tree.totals.b })}</p>
-        <div className="segmented" role="group" aria-label={t('insights.title')}>
-          <button type="button" aria-pressed={list === 'spots'} onClick={() => setList('spots')}>
-            {t('insights.spots')} ({ins.spots.length})
-          </button>
-          <button type="button" aria-pressed={list === 'improve'} onClick={() => setList('improve')}>
-            {t('insights.improvements')} ({ins.improvements.length})
-          </button>
+        <div className="row">
+          <div className="segmented" role="group" aria-label={t('insights.title')}>
+            <button type="button" aria-pressed={list === 'losses'} onClick={() => setList('losses')}>
+              {t('loss.title')} ({lossRows.length})
+            </button>
+            <button type="button" aria-pressed={list === 'spots'} onClick={() => setList('spots')}>
+              {t('insights.spots')} ({ins.spots.length})
+            </button>
+            <button type="button" aria-pressed={list === 'improve'} onClick={() => setList('improve')}>
+              {t('insights.improvements')} ({impRows.length})
+            </button>
+          </div>
+          {hasFixes && (
+            <button type="button" onClick={onPractise}>
+              {t('fixes.practiseAll')}
+            </button>
+          )}
         </div>
       </section>
 
-      {list === 'spots' ? (
+      {list === 'losses' ? (
+        <section className="panel stack" aria-labelledby="insights-losses">
+          <h2 id="insights-losses">{t('loss.title')}</h2>
+          <p className="small muted">{t('loss.help')}</p>
+          <div className="row">
+            <label className="field-inline">
+              {t('loss.games')}
+              <select value={f.scanGames} onChange={(e) => ins.setFilters({ scanGames: Number(e.target.value) })}>
+                {[50, 100, 200, 500, 2000].map((n) => (
+                  <option key={n} value={n}>
+                    {n === 2000 ? t('loss.allGames') : t('loss.lastN', { n })}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-inline">
+              {t('loss.atLeast')}
+              <select value={f.minDrop} onChange={(e) => ins.setFilters({ minDrop: e.target.value as DropLabel })}>
+                {(Object.keys(DROP) as DropLabel[]).map((k) => (
+                  <option key={k} value={k}>
+                    {t(`loss.${k}`)} (−{pct(DROP[k])})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-inline">
+              <input type="checkbox" checked={f.notWon} onChange={(e) => ins.setFilters({ notWon: e.target.checked })} />
+              {t('loss.notWon')}
+            </label>
+          </div>
+          <div className="row">
+            {losses.scan ? (
+              <>
+                <span className="small">{losses.scan.waiting ? t('insights.scanWaiting', { done: losses.scan.done, total: losses.scan.total }) : t('insights.scanning', { done: losses.scan.done, total: losses.scan.total })}</span>
+                <button type="button" onClick={losses.stopScan}>
+                  {t('insights.stop')}
+                </button>
+              </>
+            ) : (
+              losses.loaded &&
+              losses.todo > 0 && (
+                <button type="button" className="primary" onClick={() => void losses.startScan()}>
+                  {tn('loss.scan', losses.todo, { min: minutes(losses.todo) })}
+                </button>
+              )
+            )}
+            {hiddenToggle(hiddenLosses)}
+          </div>
+          <p className="small muted">
+            {t('loss.coverage', {
+              games: losses.recent.length,
+              known: losses.losses.reduce((a, l) => a + l.known, 0),
+              wanted: losses.losses.reduce((a, l) => a + l.wanted, 0),
+            })}
+          </p>
+          {losses.error && <p className="small fail">{t(`explorer.error.${losses.error}`)}</p>}
+          {lossRows.length ? (
+            <SortTable
+              rows={lossRows}
+              columns={lossCols}
+              initial="drop"
+              rowKey={(r) => r.game.id}
+              onOpen={(r) => setPlayer({ gameId: r.game.id, ply: r.worst.ply - 1 })}
+              label={t('loss.title')}
+              detail={lossSentence}
+            />
+          ) : (
+            <p>{losses.todo && !losses.scan ? t('loss.notScanned') : t('loss.none')}</p>
+          )}
+        </section>
+      ) : list === 'spots' ? (
         <section className="panel stack" aria-labelledby="insights-spots">
           <h2 id="insights-spots">{t('insights.spots')}</h2>
           <p className="small muted">{t('insights.spotsHelp', { k: SHRINK_GAMES })}</p>
@@ -617,9 +1048,16 @@ export function InsightsView({ onFetch }: { onFetch: () => void }) {
                 </button>
               )
             )}
+            {!losses.scan && impEvalTodo.length > 0 && (
+              <button type="button" onClick={() => void losses.lookupMany(impEvalTodo)}>
+                {t('insights.evalScan', { n: impEvalTodo.length })}
+              </button>
+            )}
+            {losses.scan && list === 'improve' && <span className="small">{t('insights.scanning', { done: losses.scan.done, total: losses.scan.total })}</span>}
+            {hiddenToggle(hiddenImps)}
           </div>
           <p className="small muted">
-            {ins.db === 'masters' ? t('insights.db.masters') : t('insights.db.lichess', { ratings: ins.lichessFilter.ratings.join(', '), speeds: ins.lichessFilter.speeds.join(', ') })}
+            {dbName}
             {ins.lichessFilter.rating !== null && ins.db === 'lichess' && <> · {t('insights.yourRating', { rating: ins.lichessFilter.rating })}</>}
             {' · '}
             {t('insights.looked', { done: ins.looked, total: ins.points.length, max: MAX_LOOKUPS })}
@@ -627,8 +1065,8 @@ export function InsightsView({ onFetch }: { onFetch: () => void }) {
           {!ins.hasToken && <p className="small">{t('insights.needToken')}</p>}
           <p className="small muted">{t('insights.rule', { games: ins.rule.minDbGames, share: pct(ins.rule.minShare), gain: pct(ins.rule.minGain) })}</p>
           {ins.error && <p className="small fail">{t(`explorer.error.${ins.error}`)}</p>}
-          {ins.improvements.length ? (
-            <SortTable rows={ins.improvements} columns={impCols} initial="points" rowKey={(r) => `${r.node.id}|${r.yours.uci}`} onOpen={(r) => setPath([r.node.id])} label={t('insights.improvements')} />
+          {impRows.length ? (
+            <SortTable rows={impRows} columns={impCols} initial="points" rowKey={impId} onOpen={(r) => setPath([r.node.id])} label={t('insights.improvements')} detail={improvementSentence} />
           ) : (
             <p>{ins.looked ? t('insights.noImprovements') : t('insights.notLooked')}</p>
           )}
@@ -636,4 +1074,18 @@ export function InsightsView({ onFetch }: { onFetch: () => void }) {
       )}
     </div>
   );
+}
+
+/** A fix from a database suggestion: its position, reached by its most common move order. */
+function improvementFix(imp: Improvement): Fix {
+  const sans = imp.node.orders[0]?.sans ?? [];
+  return {
+    colour: imp.node.colour,
+    fen: imp.node.fen,
+    reachedBy: sans,
+    played: imp.yours.san,
+    better: imp.better.uci,
+    why: improvementSentence(imp),
+    context: t('fixes.contextDb', { line: sans.length ? orderLine(sans) : t('insights.start'), played: moveLabel(imp.node.ply + 1, imp.yours.san), games: imp.yours.outcome.games, score: pct(scoreOf(imp.yours.outcome)) }),
+  };
 }

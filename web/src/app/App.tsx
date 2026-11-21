@@ -17,7 +17,7 @@ import { About, Disclaimer } from './About';
 import { LanguageSelect, useT } from '../i18n/react';
 import { AppUpdate, InstallButton } from './AppUpdate';
 import { Icon } from '../components/Icon';
-import { OPEN_GAME_EVENT } from './openGame';
+import { OPEN_GAME_EVENT, type OpenGameDetail } from './openGame';
 
 // Loaded on first visit to the Openings tab, so the analyser does not download chessops.
 const OpeningsView = lazy(() => import('../features/repertoire/OpeningsView').then((m) => ({ default: m.OpeningsView })));
@@ -46,6 +46,8 @@ function Shell() {
   const [linkStatus, setLinkStatus] = useState<{ text: string; error: boolean } | null>(null);
   // Phones: import and the game list fold into a "Games" panel above the board (null = automatic).
   const [gamesOpen, setGamesOpen] = useState<boolean | null>(null);
+  // The move a game was opened at from another tab (the Openings tab's game player).
+  const [openAt, setOpenAt] = useState<{ id: string; ply: number } | null>(null);
 
   /** Brings the opened game into view: on phones it sits above the lists, off-screen. */
   const revealGame = () =>
@@ -68,7 +70,11 @@ function Shell() {
 
   // Games opened from other tabs (the Openings tab's games lists).
   useEffect(() => {
-    const onOpen = (e: Event) => onImported([(e as CustomEvent<GameRecord>).detail]);
+    const onOpen = (e: Event) => {
+      const d = (e as CustomEvent<OpenGameDetail>).detail;
+      setOpenAt(d.ply ? { id: d.game.id, ply: d.ply } : null);
+      onImported([d.game]);
+    };
     window.addEventListener(OPEN_GAME_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_GAME_EVENT, onOpen);
   }, [onImported]);
@@ -220,8 +226,9 @@ function Shell() {
             <div className="game-col" ref={gameColRef}>
               {selected ? (
                 <GameView
-                  key={selected.id}
+                  key={openAt?.id === selected.id ? `${selected.id}@${openAt.ply}` : selected.id}
                   game={selected}
+                  initialPly={openAt?.id === selected.id ? openAt.ply : undefined}
                   renderExtra={backendEnabled ? (ctx) => <CloudAnalysisPanel {...ctx} /> : undefined}
                 />
               ) : (

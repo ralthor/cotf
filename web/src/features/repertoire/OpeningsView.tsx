@@ -12,6 +12,7 @@ import { InsightsView } from './InsightsView';
 import { ProgressView } from './ProgressView';
 import { TrainerView } from './TrainerView';
 import { useRepertoires } from './useRepertoires';
+import type { Side } from '../../core/repertoire/types';
 
 type View = 'browse' | 'train' | 'progress' | 'games' | 'insights';
 
@@ -52,6 +53,18 @@ export function OpeningsView() {
   };
 
   const showList = listOpen ?? !chapter;
+
+  // "My fixes": the repertoire the Improve sub-tab adds better moves to, for training.
+  const fixesRep = reps.repertoires.find((r) => r.id === getPref('fixesRepertoire')) ?? null;
+  const addFix = async (pgn: string, colour: Side) => {
+    const res = await reps.importPgn(pgn, { kind: 'pgn-paste' }, fixesRep ? { repertoireId: fixesRep.id } : { newName: t('fixes.repName') }, colour);
+    if (res.repertoire.id) setPref('fixesRepertoire', res.repertoire.id);
+  };
+  const practiseFixes = () => {
+    const id = getPref('fixesRepertoire');
+    if (id) reps.select(id);
+    setView('train');
+  };
 
   return (
     <div className="layout openings">
@@ -104,7 +117,7 @@ export function OpeningsView() {
           </div>
         )}
         {view === 'insights' ? (
-          <InsightsView key={dataVersion} onFetch={() => setView('games')} />
+          <InsightsView key={dataVersion} onFetch={() => setView('games')} onAddFix={addFix} onPractise={practiseFixes} hasFixes={!!fixesRep} />
         ) : view === 'games' ? (
           <GamesView key={dataVersion} repertoire={reps.selected} chapters={reps.chapters} onImport={reps.importPgn} />
         ) : view === 'train' && reps.repertoires.length > 0 ? (

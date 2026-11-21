@@ -1,9 +1,9 @@
 # Opening trainer: requirements review and approach
 
-Status: all seven phases implemented, 20 Nov 2026, and phase 8 on 21 Nov 2026: [phase 1](OPENING_TRAINER_PHASE1.md),
+Status: all seven phases implemented, 20 Nov 2026, and phases 8 and 9 on 21 Nov 2026: [phase 1](OPENING_TRAINER_PHASE1.md),
 [phase 2](OPENING_TRAINER_PHASE2.md), [phase 3](OPENING_TRAINER_PHASE3.md), [phase 4](OPENING_TRAINER_PHASE4.md),
 [phase 5](OPENING_TRAINER_PHASE5.md), [phase 6](OPENING_TRAINER_PHASE6.md), [phase 7](OPENING_TRAINER_PHASE7.md),
-[phase 8](OPENING_TRAINER_PHASE8.md).
+[phase 8](OPENING_TRAINER_PHASE8.md), [phase 9](OPENING_TRAINER_PHASE9.md).
 The original requirements are copied at the end of this file.
 
 ## Summary
@@ -143,6 +143,9 @@ Progressive, each step costing grade: the piece to move, then its square, then a
 7. **Curated explanations, traps and reasoning questions.** → [phase 7 plan](OPENING_TRAINER_PHASE7.md)
 8. **Learn from your own games**: weak spots, better moves from the opening database, and the games and
    move orders behind every number. → [phase 8 plan](OPENING_TRAINER_PHASE8.md)
+9. **Lost in the opening, and training the fixes**: Lichess evaluations (no engine on the device), a game
+   player with the played, engine and database moves, and a My fixes repertoire that starts at the
+   position. → [phase 9 plan](OPENING_TRAINER_PHASE9.md)
 
 ## Open questions
 

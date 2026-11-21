@@ -84,6 +84,14 @@ the selected repertoire:
 - Every row opens what is behind it: the numbers worked out step by step, every move order that reaches
   the position, what was played next, the database's moves, and the games themselves with links and
   **Analyse**.
+- **Lost in the opening**: each recent game with the move where your win chances dropped most, from
+  Lichess evaluations (the game's own analysis, or Lichess cloud evaluations; no engine runs on your
+  device), with the best move and where you stood when the opening ended.
+- A **game player** shows any of these games with the move played, the engine's move and the database's
+  move side by side, the evaluation, and links to the game on Lichess and to Analyse at that move.
+- **My fixes**: a better move becomes a training chapter that starts at that position, with the
+  opponent's likely replies from the database.
+- **Not a problem** hides a finding.
 - In Browse, **Your games here** shows the same for the selected position.
 
 Positions are named with ECO codes and opening names from the Lichess

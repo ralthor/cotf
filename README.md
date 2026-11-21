@@ -73,13 +73,27 @@ the selected repertoire:
 
 - **Your openings**: your games grouped by the opening they reached, with your score.
 
+**Improve** (the fifth sub-tab) learns from your own games, without a repertoire:
+
+- **Weak spots**: positions where your score drops compared with one move earlier, ranked by points
+  lost (games × the drop), with how often you reach them, how often you lose and the move number as
+  sortable columns.
+- **Better moves**: your moves compared with the Lichess players database (your rating group and the
+  next, at the speeds you play; needs your Lichess token) or the masters database, ranked by points to
+  gain. Only main moves are suggested.
+- Every row opens what is behind it: the numbers worked out step by step, every move order that reaches
+  the position, what was played next, the database's moves, and the games themselves with links and
+  **Analyse**.
+- In Browse, **Your games here** shows the same for the selected position.
+
 Positions are named with ECO codes and opening names from the Lichess
 [chess-openings](https://github.com/lichess-org/chess-openings) dataset (CC0), bundled and available
 offline. In Browse, the optional **Explorer statistics** panel shows how often each move is played and
 how it scores: the Masters database works as is; the Lichess players database needs your own Lichess
 API token (no permissions), kept in this browser.
 
-Only the players, result, date and first 40 moves of each game are kept, in this browser. Only
+Only the players, ratings, result, date, first 40 moves and the game's PGN (to open it in Analyse)
+are kept, in this browser. Only
 standard chess is supported; see `docs/OPENING_TRAINER.md` for what comes next.
 
 ## Install and offline use

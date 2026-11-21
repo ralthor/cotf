@@ -8,6 +8,7 @@ import { buildMoves } from '../core/repertoire/graph';
 import { logKey, type BackupData } from '../core/repertoire/backup';
 import type { OpeningGame } from '../core/repertoire/games';
 import type { MoveGrade } from '../features/explore/grade';
+import type { ExplorerResult } from '../features/repertoire/explorer';
 
 interface AnalyserDB extends DBSchema {
   games: { key: string; value: GameRecord; indexes: { importedAt: string } };
@@ -28,10 +29,12 @@ interface AnalyserDB extends DBSchema {
   // Version 4: your games against your repertoire.
   openingGames: { key: string; value: OpeningGame; indexes: { playedAt: string } };
   moveGrades: { key: string; value: MoveGrade };
+  /** Opening explorer answers by request URL, with when they were fetched. */
+  explorer: { key: string; value: { result: ExplorerResult; at: string } };
 }
 
 export const DB_NAME = 'chess-analyser';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 /** Games kept for the repertoire comparison; the oldest are dropped. */
 export const MAX_OPENING_GAMES = 2000;
 const MAX_GAMES = 500;
@@ -66,6 +69,9 @@ export function getDb(): Promise<IDBPDatabase<AnalyserDB> | null> {
         if (oldVersion < 4) {
           db.createObjectStore('openingGames', { keyPath: 'id' }).createIndex('playedAt', 'playedAt');
           db.createObjectStore('moveGrades');
+        }
+        if (oldVersion < 5) {
+          db.createObjectStore('explorer');
         }
       },
     }).catch(() => null);
@@ -364,5 +370,23 @@ export const moveGradeStore = {
   async put(key: string, grade: MoveGrade): Promise<void> {
     const db = await getDb();
     await db?.put('moveGrades', grade, key);
+  },
+};
+
+/** Explorer answers kept so a scan of your positions asks Lichess once per position. */
+export const explorerStore = {
+  async get(url: string): Promise<{ result: ExplorerResult; at: string } | undefined> {
+    const db = await getDb();
+    return db ? db.get('explorer', url) : undefined;
+  },
+  async put(url: string, result: ExplorerResult): Promise<string> {
+    const at = new Date().toISOString();
+    const db = await getDb();
+    await db?.put('explorer', { result, at }, url);
+    return at;
+  },
+  async clear(): Promise<void> {
+    const db = await getDb();
+    await db?.clear('explorer');
   },
 };

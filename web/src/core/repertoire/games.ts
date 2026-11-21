@@ -27,6 +27,11 @@ export type OpeningGame = {
   playedAt: string;
   timeClass?: string;
   opening?: string;
+  /** Ratings at the time of the game, when the site gave them. */
+  userRating?: number;
+  opponentRating?: number;
+  /** The whole game as PGN, to open it in the Analyse tab (games fetched before Nov 2026 have none). */
+  pgn?: string;
   /** The first moves, SAN and standard UCI. */
   moves: { san: string; uci: string }[];
 };
@@ -52,6 +57,8 @@ export function toOpeningGame(g: GameRecord, username: string): OpeningGame | nu
   const userColour: Side | null = white.toLowerCase() === u ? 'w' : black.toLowerCase() === u ? 'b' : null;
   if (!userColour) return null;
   const r = g.headers.Result;
+  const elo = (v: string | undefined) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
+  const [mine, theirs] = userColour === 'w' ? [g.headers.WhiteElo, g.headers.BlackElo] : [g.headers.BlackElo, g.headers.WhiteElo];
   return {
     id: g.id,
     source: g.source,
@@ -63,6 +70,9 @@ export function toOpeningGame(g: GameRecord, username: string): OpeningGame | nu
     playedAt: playedAt(g),
     timeClass: g.providerData?.timeClass,
     opening: g.headers.Opening ?? g.headers.ECOUrl?.split('/').pop()?.replace(/-/g, ' '),
+    userRating: elo(mine),
+    opponentRating: elo(theirs),
+    pgn: g.rawPgn,
     moves: g.moves.slice(0, GAME_PLIES).map((m) => ({ san: m.san, uci: m.uci })),
   };
 }

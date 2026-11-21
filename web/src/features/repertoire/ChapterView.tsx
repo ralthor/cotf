@@ -10,6 +10,7 @@ import { t } from '../../i18n';
 import { useT } from '../../i18n/react';
 import { sideLabel } from './RepertoireList';
 import { ExplorerPanel } from './ExplorerPanel';
+import { YourGamesPanel } from './YourGamesPanel';
 import { useOpenings } from './useOpenings';
 import { VariationTree } from './VariationTree';
 
@@ -256,6 +257,7 @@ export function ChapterView({ chapter }: { chapter: Chapter }) {
             </p>
           </section>
           <ExplorerPanel node={node} onPlay={(i) => go([...path, i])} />
+          <YourGamesPanel node={node} side={chapter.side} onPlay={(i) => go([...path, i])} />
         </div>
       </div>
     </div>

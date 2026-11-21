@@ -325,3 +325,23 @@ Plan: `OPENING_TRAINER_PHASE7.md`.
   from the comment), deterministic per position, and never graded for spaced repetition.
 - **At most two questions per line** in Learn and Memorise; the move's comment and arrows are hidden
   until the question is answered, since they hold the answer.
+
+## Learning from your own games (phase 8, 21 Nov 2026)
+
+Plan: `OPENING_TRAINER_PHASE8.md`.
+
+- **Your own games are a map, not something to memorise.** They feed weak spots and better moves;
+  training your own moves is still possible but not the point.
+- **One ranking number per list**, with the parts as sortable columns: points lost = games × score drop
+  from one move earlier (shrunk by 5 imaginary games); points to gain = your games × gain per game.
+  Move number is a filter and a column, not a weight, so it is not counted twice.
+- **The drop is measured against one move earlier**, so the list names the move where things go wrong
+  instead of every later position on the same line.
+- **The opening database, not the engine, judges moves** across thousands of games: it is fast,
+  matches your rating group and speeds, and is already cached per position. A suggested move must be a
+  main move (enough games and at least 5% of the position's games).
+- **Every number opens to its games and move orders.** Games now keep their ratings and PGN so they can
+  be shown and opened in Analyse.
+- **Phone layout:** the single column is `minmax(0, 1fr)` and wide tables scroll inside their own box,
+  so no sub-tab makes the page wider than the screen (it did on all of them at 375 px).
+

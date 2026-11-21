@@ -96,7 +96,7 @@ main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 .notice { background: var(--surface-2); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
 
 .layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 
 .review { display: grid; grid-template-columns: 28px minmax(280px, 560px) minmax(260px, 1fr); gap: 12px; align-items: start; }
 @media (max-width: 1100px) { .review { grid-template-columns: 22px minmax(0, 1fr); } .review > .side { grid-column: 1 / -1; } }
@@ -487,7 +487,7 @@ label.file-button:focus-within { outline: 2px solid var(--accent); outline-offse
 .games-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .games-table th, .games-table td { text-align: start; padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .games-table td:not(:first-child), .games-table th:not(:first-child) { white-space: nowrap; }
-.table-scroll { overflow-x: auto; }
+.table-scroll { position: relative; overflow-x: auto; }
 
 /* Openings: explorer */
 .explorer-table td { vertical-align: middle; }
@@ -502,3 +502,23 @@ label.file-button:focus-within { outline: 2px solid var(--accent); outline-offse
 .question-text { margin: 0; font-size: 15px; white-space: pre-line; }
 button.choice-right { border-color: var(--cat-best); background: color-mix(in srgb, var(--cat-best) 18%, var(--surface)); font-weight: 600; }
 button.choice-wrong { border-color: var(--cat-mistake); background: color-mix(in srgb, var(--cat-mistake) 15%, var(--surface)); }
+
+/* Openings → Improve: weak spots and better moves from your games */
+.field-inline { display: inline-flex; gap: 6px; align-items: center; }
+.field-inline input[type='number'] { width: 4.5em; }
+.insight-table th button.link { color: inherit; text-decoration: none; font-weight: 600; white-space: nowrap; }
+.games-table tr.clickable { cursor: pointer; }
+.games-table tr.clickable:hover { background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
+.games-table tr.highlight { background: rgba(21, 120, 27, 0.14); }
+.insight-table td:nth-child(2) { white-space: normal; min-width: 14em; }
+.insight-title { margin: 0; font-size: 1.1rem; }
+.good-text { color: var(--good, #3c9a3c); }
+.bad-text { color: var(--danger); }
+.order-list { margin: 0; padding-inline-start: 0; list-style: none; display: grid; gap: 6px; }
+.order-moves { display: inline; }
+.move-chip { text-decoration: none; padding: 0 2px; margin-inline-end: 3px; color: inherit; }
+.move-chip.current { background: var(--accent); color: var(--accent-text); border-radius: 3px; }
+.move-chip:disabled { opacity: 1; cursor: default; }
+/* Five sub-tabs can be wider than a phone: let the row scroll instead of the page. */
+.openings-tabs { overflow-x: auto; scrollbar-width: none; }
+.openings-tabs button { flex: none; white-space: nowrap; }

@@ -8,11 +8,12 @@ import { RepertoireImport } from './RepertoireImport';
 import { RepertoireList } from './RepertoireList';
 import { BackupPanel } from './BackupPanel';
 import { GamesView } from './GamesView';
+import { InsightsView } from './InsightsView';
 import { ProgressView } from './ProgressView';
 import { TrainerView } from './TrainerView';
 import { useRepertoires } from './useRepertoires';
 
-type View = 'browse' | 'train' | 'progress' | 'games';
+type View = 'browse' | 'train' | 'progress' | 'games' | 'insights';
 
 /** The Openings tab: repertoires and their chapters on the left, the open chapter on the right. */
 export function OpeningsView() {
@@ -25,7 +26,7 @@ export function OpeningsView() {
   };
   const [view, setViewState] = useState<View>(() => {
     const saved = getPref('openingsView');
-    return saved === 'train' || saved === 'progress' || saved === 'games' ? saved : 'browse';
+    return saved === 'train' || saved === 'progress' || saved === 'games' || saved === 'insights' ? saved : 'browse';
   });
   // Bumped after a restore, so the training views read their data again.
   const [dataVersion, setDataVersion] = useState(0);
@@ -95,14 +96,16 @@ export function OpeningsView() {
       <div className="game-col" ref={chapterCol}>
         {reps.loaded && (
           <div className="tabs openings-tabs" role="tablist" aria-label={t('nav.openings')}>
-            {(['browse', 'train', 'progress', 'games'] as const).map((v) => (
+            {(['browse', 'train', 'progress', 'games', 'insights'] as const).map((v) => (
               <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}>
                 {t(`openings.${v}`)}
               </button>
             ))}
           </div>
         )}
-        {view === 'games' ? (
+        {view === 'insights' ? (
+          <InsightsView key={dataVersion} onFetch={() => setView('games')} />
+        ) : view === 'games' ? (
           <GamesView key={dataVersion} repertoire={reps.selected} chapters={reps.chapters} onImport={reps.importPgn} />
         ) : view === 'train' && reps.repertoires.length > 0 ? (
           <TrainerView key={dataVersion} repertoire={reps.selected} chapters={reps.chapters} />

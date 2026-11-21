@@ -45,6 +45,9 @@ describe('games against the repertoire', () => {
     expect(g).toMatchObject({ id: 'g1', userColour: 'w', result: '1-0', playedAt: '2026-11-01T10:00:00.000Z' });
     expect(g.moves.map((m) => m.uci)).toEqual(['e2e4', 'e7e5', 'g1f3']);
     expect(userScore(g)).toBe(1);
+    const rated = toOpeningGame(parseSingleGame('[White "Opp"]\n[Black "me"]\n[WhiteElo "1810"]\n[BlackElo "1750"]\n[Result "0-1"]\n\n1. e4 e5 0-1', { source: 'lichess' }), 'Me')!;
+    expect(rated).toMatchObject({ userColour: 'b', userRating: 1750, opponentRating: 1810 });
+    expect(rated.pgn).toContain('1. e4 e5');
     expect(userScore({ ...g, userColour: 'b' })).toBe(0);
     const rec = parseSingleGame('[White "a"]\n[Black "b"]\n\n1. e4 *', { source: 'lichess' });
     expect(toOpeningGame(rec, 'me')).toBeNull();

@@ -17,6 +17,7 @@ import { About, Disclaimer } from './About';
 import { LanguageSelect, useT } from '../i18n/react';
 import { AppUpdate, InstallButton } from './AppUpdate';
 import { Icon } from '../components/Icon';
+import { OPEN_GAME_EVENT } from './openGame';
 
 // Loaded on first visit to the Openings tab, so the analyser does not download chessops.
 const OpeningsView = lazy(() => import('../features/repertoire/OpeningsView').then((m) => ({ default: m.OpeningsView })));
@@ -64,6 +65,13 @@ function Shell() {
     if (window.location.hash !== '#/analyse' && window.location.hash !== '') window.location.hash = '#/analyse';
     revealGame();
   }, []);
+
+  // Games opened from other tabs (the Openings tab's games lists).
+  useEffect(() => {
+    const onOpen = (e: Event) => onImported([(e as CustomEvent<GameRecord>).detail]);
+    window.addEventListener(OPEN_GAME_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_GAME_EVENT, onOpen);
+  }, [onImported]);
 
   useEffect(() => {
     // ?lichess=<id or URL> (in the hash or the query): open that game, importing it unless

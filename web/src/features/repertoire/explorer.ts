@@ -28,13 +28,29 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
-export function explorerUrl(db: ExplorerDb, fen: string): string {
+/** Rating groups of the Lichess players database (each is "from this rating"). */
+export const RATING_GROUPS = [0, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2500] as const;
+export const SPEEDS = ['bullet', 'blitz', 'rapid', 'classical', 'correspondence'] as const;
+
+/** Which games of the Lichess players database to count. */
+export type LichessFilter = { ratings: readonly number[]; speeds: readonly string[] };
+
+export const DEFAULT_FILTER: LichessFilter = { ratings: [1600, 1800, 2000, 2200, 2500], speeds: ['blitz', 'rapid', 'classical'] };
+
+export function explorerUrl(db: ExplorerDb, fen: string, filter: LichessFilter = DEFAULT_FILTER): string {
   const p = new URLSearchParams({ variant: 'standard', fen, moves: '12', topGames: '0', recentGames: '0' });
   if (db === 'lichess') {
-    p.set('speeds', 'blitz,rapid,classical');
-    p.set('ratings', '1600,1800,2000,2200,2500');
+    p.set('speeds', filter.speeds.join(','));
+    p.set('ratings', filter.ratings.join(','));
   }
   return `${EXPLORER}/${db}?${p}`;
+}
+
+/** The rating group a rating falls in and the one above: the players closest to you. */
+export function ratingGroupsFor(rating: number): number[] {
+  let i = 0;
+  while (i + 1 < RATING_GROUPS.length && RATING_GROUPS[i + 1]! <= rating) i++;
+  return RATING_GROUPS.slice(i, i + 2) as number[];
 }
 
 export function parseExplorer(data: unknown): ExplorerResult {
@@ -60,8 +76,8 @@ export class ExplorerClient {
   constructor(private readonly fetchFn: FetchLike = (i, init) => fetch(i, init)) {}
 
   /** `token` is required for the Lichess players database, ignored when empty. */
-  async get(db: ExplorerDb, fen: string, token: string, signal?: AbortSignal): Promise<ExplorerResult> {
-    const url = explorerUrl(db, fen);
+  async get(db: ExplorerDb, fen: string, token: string, signal?: AbortSignal, filter?: LichessFilter): Promise<ExplorerResult> {
+    const url = explorerUrl(db, fen, filter);
     const hit = this.cache.get(url);
     if (hit) return hit;
     let res: Response;

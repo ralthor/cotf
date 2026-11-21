@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ExplorerClient, ExplorerError, explorerUrl } from './explorer';
+import { ExplorerClient, ExplorerError, explorerUrl, ratingGroupsFor } from './explorer';
 
 const FEN = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const body = { white: 10, draws: 5, black: 7, moves: [{ uci: 'c7c5', san: 'c5', white: 4, draws: 2, black: 3, averageRating: 2400 }, { bad: 1 }], opening: { eco: 'B00', name: "King's Pawn Game" } };
@@ -34,5 +34,14 @@ describe('opening explorer', () => {
     expect(await code(401)).toBe('token');
     expect(await code(429)).toBe('rate');
     expect(await code(500)).toBe('network');
+  });
+
+  it('compares with players near your rating, at your speeds', () => {
+    expect(ratingGroupsFor(1650)).toEqual([1600, 1800]);
+    expect(ratingGroupsFor(900)).toEqual([0, 1000]);
+    expect(ratingGroupsFor(2700)).toEqual([2500]);
+    const url = new URL(explorerUrl('lichess', FEN, { ratings: [1600, 1800], speeds: ['rapid'] }));
+    expect(url.searchParams.get('ratings')).toBe('1600,1800');
+    expect(url.searchParams.get('speeds')).toBe('rapid');
   });
 });

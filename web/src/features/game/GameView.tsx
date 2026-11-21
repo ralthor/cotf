@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Chessboard, type PieceDropHandlerArgs } from 'react-chessboard';
+import { Chessboard } from 'react-chessboard';
+import { DRAG_ACTIVATION_PX, mergeSquareStyles, useClickToMove } from '../../components/useClickToMove';
 import { gameTitle } from '../../core/chess/pgn';
 import { lichessAnalysisUrl } from '../../core/chess/links';
 import { fenAfterLine, squarePosition } from '../../core/chess/lines';
@@ -286,9 +287,8 @@ export function GameView({ game, renderExtra }: GameViewProps) {
   // Pieces can be moved at any time: in the game this starts your own line, in practice it is your answer.
   const sideToMove = fen.split(' ')[1] === 'b' ? 'b' : 'w';
   const canDrag = practiceFen ? !practice!.attempt && !practice!.solution : true;
-  const onPieceDrop = ({ sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
-    if (!targetSquare || sourceSquare === targetSquare || !canDrag) return false;
-    const m = legalMove(fen, sourceSquare, targetSquare);
+  const playMove = (from: string, to: string): boolean => {
+    const m = legalMove(fen, from, to);
     if (!m) return false;
     if (practice && practiceFen && practiceMove) {
       setPractice({ ...practice, attempt: m.uci });
@@ -311,6 +311,8 @@ export function GameView({ game, renderExtra }: GameViewProps) {
     if (engineOn) void grader.grade(fen, m.uci, known);
     return true;
   };
+  const board = useClickToMove({ fen, enabled: canDrag, side: practiceFen ? practice!.side : sideToMove, move: playMove });
+  const boardStyles = useMemo(() => mergeSquareStyles(squareStyles, board.squareStyles), [squareStyles, board.squareStyles]);
 
   const side = orientation === 'white' ? 'w' : 'b';
   const sideName = side === 'w' ? t('practice.white') : t('practice.black');
@@ -450,10 +452,12 @@ export function GameView({ game, renderExtra }: GameViewProps) {
                 position: fen,
                 boardOrientation: orientation,
                 allowDragging: canDrag,
-                canDragPiece: ({ piece }) => piece.pieceType[0] === (practiceFen ? practice!.side : sideToMove),
-                onPieceDrop,
+                dragActivationDistance: DRAG_ACTIVATION_PX,
+                canDragPiece: board.canDragPiece,
+                onPieceDrop: board.onPieceDrop,
+                onSquareClick: board.onSquareClick,
                 arrows,
-                squareStyles,
+                squareStyles: boardStyles,
                 lightSquareStyle: { backgroundColor: 'var(--board-light)' },
                 darkSquareStyle: { backgroundColor: 'var(--board-dark)' },
                 animationDurationInMs: 150,

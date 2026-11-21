@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Chessboard, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
+import { Chessboard, type SquareHandlerArgs } from 'react-chessboard';
+import { DRAG_ACTIVATION_PX, mergeSquareStyles, useClickToMove } from '../../components/useClickToMove';
 import { displayComments } from '../../core/repertoire/parse';
 import { openingOf } from '../../core/openings/names';
 import type { Question } from '../../core/repertoire/questions';
@@ -23,7 +24,6 @@ const SHAPE: Record<ShapeColor, string> = {
 const LAST_MOVE = 'rgba(47,111,143,0.28)';
 const HINT = 'rgba(230,143,0,0.45)';
 const MOVE_ARROW = 'rgba(21,120,27,0.8)';
-const SELECTED = 'rgba(47,111,143,0.5)';
 
 /** "3… Bf5" for a note's move. */
 function moveLabel(n: Note): string {
@@ -200,9 +200,15 @@ function MistakeList({
 export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnType<typeof useTrainer>; session: Session; side: Side; noHints: boolean }) {
   const ask = s.ask;
   const asking = s.phase === 'ask' && !!ask;
-  // Click-to-move: the square picked first (forgotten when the position changes).
-  const [picked, setPicked] = useState<{ fen: string; square: string } | null>(null);
-  const selected = asking && picked?.fen === s.fen ? picked.square : null;
+  const board = useClickToMove({
+    fen: s.fen,
+    enabled: asking,
+    side,
+    move: (from, to) => {
+      const m = legalMove(s.fen, from, to);
+      return m ? tr.answer(m.uci, m.san) : false;
+    },
+  });
   // While you are asked (outside Learn's shown moves), the opponent's comments could give the answer away.
   const hideLatest = asking && !ask.intro;
   // While a question about your move is open, its comment and arrows would give the answer away.
@@ -235,26 +241,14 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
       for (const sh of latest.node.shapes ?? []) if (sh.from === sh.to) out[sh.from] = { ...out[sh.from], boxShadow: `inset 0 0 0 4px ${SHAPE[sh.color]}`, borderRadius: '50%' };
     }
     if (ask && ask.hint > 0 && ask.hint < 3) for (const sq of hintFor(accepted(ask), ask.hint).squares) out[sq] = { ...out[sq], background: HINT };
-    if (selected) out[selected] = { ...out[selected], background: SELECTED };
     const qa = s.question?.kind === 'plan' ? s.questionAnswer : null;
     if (qa) out[qa.value] = { ...out[qa.value], background: qa.right ? 'rgba(21,120,27,0.45)' : 'rgba(136,32,32,0.45)' };
-    return out;
-  }, [s.lastUci, s.notes, latest, ask, selected, s.question, s.questionAnswer]);
+    return mergeSquareStyles(out, board.squareStyles);
+  }, [s.lastUci, s.notes, latest, ask, board.squareStyles, s.question, s.questionAnswer]);
 
-  const onPieceDrop = ({ sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
-    if (!asking || !targetSquare || sourceSquare === targetSquare) return false;
-    setPicked(null);
-    const m = legalMove(s.fen, sourceSquare, targetSquare);
-    return m ? tr.answer(m.uci, m.san) : false;
-  };
-  const onSquareClick = ({ square, piece }: SquareHandlerArgs) => {
-    if (questionOpen && s.question?.kind === 'plan') return tr.answerQuestion(square);
-    if (!asking) return;
-    if (piece && piece.pieceType[0] === side) return setPicked(square === selected ? null : { fen: s.fen, square });
-    if (!selected) return;
-    setPicked(null);
-    const m = legalMove(s.fen, selected, square);
-    if (m) tr.answer(m.uci, m.san);
+  const onSquareClick = (args: SquareHandlerArgs) => {
+    if (questionOpen && s.question?.kind === 'plan') return tr.answerQuestion(args.square);
+    board.onSquareClick(args);
   };
 
   const good = s.results.filter((r) => r === 'good').length;
@@ -356,8 +350,9 @@ export function TrainingBoard({ tr, session: s, side, noHints }: { tr: ReturnTyp
                 position: s.fen || 'start',
                 boardOrientation: side === 'b' ? 'black' : 'white',
                 allowDragging: asking,
-                canDragPiece: ({ piece }) => piece.pieceType[0] === side,
-                onPieceDrop,
+                dragActivationDistance: DRAG_ACTIVATION_PX,
+                canDragPiece: board.canDragPiece,
+                onPieceDrop: board.onPieceDrop,
                 onSquareClick,
                 arrows,
                 squareStyles,

@@ -96,14 +96,12 @@ export function OpeningsView() {
           onSaveChapters={reps.saveChapters}
           onRefresh={(id) => reps.refreshStudies(id)}
         />
-        {reps.repertoires.length > 0 && (
-          <BackupPanel
-            onRestored={() => {
-              void reps.reloadAll();
-              setDataVersion((v) => v + 1);
-            }}
-          />
-        )}
+        <BackupPanel
+          onRestored={() => {
+            void reps.reloadAll();
+            setDataVersion((v) => v + 1);
+          }}
+        />
         <RepertoireImport repertoires={reps.repertoires} selectedId={reps.selected?.id ?? null} onImport={reps.importPgn} />
       </div>
       <div className="game-col" ref={chapterCol}>

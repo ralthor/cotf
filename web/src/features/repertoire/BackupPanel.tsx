@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
-import { BackupError, makeBackup, parseBackup } from '../../core/repertoire/backup';
+import { BackupError, parseBackup } from '../../core/repertoire/backup';
 import { getLocale, t, tn } from '../../i18n';
 import { useT } from '../../i18n/react';
 import { backupStore, repertoireStore, trainStore } from '../../storage/db';
+import { exportEverything, FullBackupError, importEverything, isFullBackup, parseFullBackup } from '../../storage/fullBackup';
 import { getPref, setPref } from '../../storage/prefs';
 import { downloadText } from '../analysis/export';
 
 /** Days after which a backup counts as old. */
 const REMIND_DAYS = 7;
 
-/** Backup of all repertoires and training progress as one JSON file: download and restore. */
+/**
+ * Backup of everything the app keeps in this browser as one JSON file (all but the Lichess token):
+ * download, and restore, which replaces everything. Older openings-only files still restore as before.
+ */
 export function BackupPanel({ onRestored }: { onRestored: () => void }) {
   useT();
   const [last, setLast] = useState(() => getPref('lastBackup'));
@@ -29,12 +33,15 @@ export function BackupPanel({ onRestored }: { onRestored: () => void }) {
   const download = async () => {
     setBusy(true);
     try {
-      const data = await backupStore.read();
       const now = new Date();
-      downloadText(`chess-on-the-fly-openings-${now.toISOString().slice(0, 10)}.json`, makeBackup(data, now), 'application/json');
+      // Recorded first, so the file says when it was made too.
       setPref('lastBackup', now.toISOString());
       setLast(now.toISOString());
-      setStatus({ text: t('backup.saved', { reps: data.repertoires.length, cards: data.trainCards.length }) });
+      const { text, counts } = await exportEverything(now);
+      downloadText(`chess-on-the-fly-backup-${now.toISOString().slice(0, 10)}.json`, text, 'application/json');
+      setStatus({ text: t('backup.savedAll', { reps: counts.repertoires ?? 0, cards: counts.trainCards ?? 0, games: (counts.games ?? 0) + (counts.openingGames ?? 0), analyses: counts.analyses ?? 0 }) });
+    } catch (e) {
+      setStatus({ text: t('import.failed', { reason: e instanceof FullBackupError ? t(`backup.error.${e.code}`) : (e as Error).message }), error: true });
     } finally {
       setBusy(false);
     }
@@ -42,9 +49,11 @@ export function BackupPanel({ onRestored }: { onRestored: () => void }) {
 
   const restore = async (file: File) => {
     setStatus(null);
+    const text = await file.text();
+    if (isFullBackup(text)) return restoreAll(text);
     let backup;
     try {
-      backup = parseBackup(await file.text());
+      backup = parseBackup(text);
     } catch (e) {
       setStatus({ text: t(`backup.error.${e instanceof BackupError ? e.code : 'json'}`), error: true });
       return;
@@ -61,6 +70,27 @@ export function BackupPanel({ onRestored }: { onRestored: () => void }) {
     } catch (e) {
       setStatus({ text: t('import.failed', { reason: (e as Error).message }), error: true });
     } finally {
+      setBusy(false);
+    }
+  };
+
+  /** A full backup: replaces everything here (the Lichess token stays), then reloads the page. */
+  const restoreAll = async (text: string) => {
+    let backup;
+    try {
+      backup = parseFullBackup(text);
+    } catch (e) {
+      setStatus({ text: t(`backup.error.${e instanceof FullBackupError ? e.code : 'json'}`), error: true });
+      return;
+    }
+    const date = backup.exportedAt ? new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(backup.exportedAt)) : '?';
+    if (!window.confirm(t('backup.confirmAll', { date }))) return;
+    setBusy(true);
+    try {
+      await importEverything(backup);
+      location.reload();
+    } catch (e) {
+      setStatus({ text: t('import.failed', { reason: (e as Error).message }), error: true });
       setBusy(false);
     }
   };

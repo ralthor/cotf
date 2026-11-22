@@ -58,9 +58,11 @@ square.
 is due, first-time accuracy and its change, answers per day for the last 30 days, streaks and
 records, progress per chapter, and the hardest positions with a button to practise each.
 
-**Backup** (left column) downloads one JSON file with every repertoire, chapter and training result,
-and restores it here or on another device. It reminds you when you have training progress and no
-backup from the last 7 days.
+**Backup** (left column of Openings) exports everything the app keeps in the browser as one JSON
+file: repertoires, training, your games, analyses, saved engine and database results, settings and the
+language. Your Lichess token is never in it. Importing replaces everything here with the file, except
+the Lichess token, which stays. Older openings-only backups still import as before (repertoires merged).
+It reminds you when you have training progress and no backup from the last 7 days.
 
 **Games** (the fourth sub-tab) fetches your recent Chess.com and Lichess games and compares them with
 the selected repertoire:

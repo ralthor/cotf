@@ -22,3 +22,33 @@ export function setPref(key: PrefKey, value: string | null): void {
     // Storage unavailable: the preference simply won't be remembered.
   }
 }
+
+/** Every preference this app keeps, by key (for the full backup). */
+export function allPrefs(): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(PREFIX)) out[k.slice(PREFIX.length)] = localStorage.getItem(k) ?? '';
+    }
+  } catch {
+    // Storage unavailable: nothing to export.
+  }
+  return out;
+}
+
+/** Replaces every preference with `prefs`, leaving the keys in `keep` as they are. */
+export function replacePrefs(prefs: Record<string, string>, keep: readonly PrefKey[]): void {
+  const kept = new Set(keep.map((k) => PREFIX + k));
+  try {
+    const old: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(PREFIX) && !kept.has(k)) old.push(k);
+    }
+    for (const k of old) localStorage.removeItem(k);
+    for (const [k, v] of Object.entries(prefs)) if (!kept.has(PREFIX + k)) localStorage.setItem(PREFIX + k, v);
+  } catch {
+    // Storage unavailable: preferences are not restored.
+  }
+}

@@ -9,14 +9,12 @@ import type { MoveCategory } from '../../core/classification/classify';
 import type { EngineScore } from '../../core/engine/types';
 import { formatScore } from '../../core/scoring/score';
 import { dbMoves, isMainMove, moveLabel, walkGame, type ImprovementRule } from '../../core/repertoire/insights';
-import { dropLabel, winFor, type DropLabel, type LossMove } from '../../core/repertoire/openingLoss';
+import { dropLabel, engineValue, MIN_DB_GAMES, scoreFromWin, type DropLabel, type LossMove, type PlyValue } from '../../core/repertoire/openingLoss';
 import type { OpeningGame } from '../../core/repertoire/games';
-import { getLocale, t } from '../../i18n';
+import { getLocale, t, tn } from '../../i18n';
 import type { ExplorerResult } from './explorer';
 import { keyOfFen, sanLine, sanOf, type Fix } from './fixes';
-import type { CloudEval } from './cloudEval';
 import type { useOpeningLosses } from './useOpeningLosses';
-import { evalAtFor } from './useOpeningLosses';
 
 const pct = (x: number) => new Intl.NumberFormat(getLocale(), { style: 'percent', maximumFractionDigits: 0 }).format(x);
 const ARROW = { played: 'rgba(47,111,143,0.85)', engine: 'rgba(21,120,27,0.85)', db: 'rgba(208,102,28,0.85)' };
@@ -41,8 +39,8 @@ export type PlayerProps = {
 };
 
 /**
- * One of your games, move by move: the evaluation (Lichess cloud, or the game's own when it was
- * analysed on Lichess), what you played, the engine's move and the database's moves, side by side.
+ * One of your games, move by move: your win chances (from the engine in this browser, or from the
+ * database's results), what you played, the engine's move and the database's moves, side by side.
  */
 export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFen, dbName, rule, onAddFix, fixBusy, onBack }: PlayerProps) {
   // The whole game when its PGN was kept, else its first moves.
@@ -83,44 +81,55 @@ export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFe
   const turn = fen.split(' ')[1] === 'w' ? 'w' : 'b';
   const mine = turn === game.userColour;
 
-  // Look up what is missing for this position, once the user stops on it.
-  const { lookupOne } = losses;
+  // Analyse this position with the engine here (and the database), once the user stops on it.
+  const { analyseOne, source } = losses;
+  const byDb = source === 'database';
   useEffect(() => {
     const id = setTimeout(() => {
-      void lookupOne(key, fen);
-      if (afterFen) void lookupOne(afterKey, afterFen);
-      if (mine) void lookupFen(fen);
+      void (async () => {
+        await analyseOne(key, fen);
+        if (afterFen && !byDb) await analyseOne(afterKey, afterFen);
+      })();
+      if (mine || byDb) void lookupFen(fen);
+      if (afterFen && byDb) void lookupFen(afterFen);
     }, 350);
     return () => clearTimeout(id);
-  }, [key, fen, afterKey, afterFen, mine, lookupOne, lookupFen]);
+  }, [key, fen, afterKey, afterFen, mine, byDb, analyseOne, lookupFen]);
 
-  const evalAt = useMemo(() => evalAtFor(game, maxPly, losses.cloud), [game, maxPly, losses.cloud]);
-  const scoreOf = (p: number, k: string): { score: EngineScore; pv?: string[]; depth?: number; cloud?: CloudEval | null } | undefined => {
-    const own = p <= maxPly ? evalAt(p) : undefined;
-    const c = losses.cloud.get(k);
-    if (own) return { ...own, depth: c?.depth };
-    return c ? { score: c.score, pv: c.pv, depth: c.depth } : undefined;
+  const valueAt = useMemo(() => losses.valueFor(game), [losses, game]);
+  const engineAt = (k: string) => losses.evals.get(k);
+  /** The value of a position: the engine's, or the database's (within the opening, else its own results). */
+  const valueOf = (p: number, k: string, f: string): PlyValue | undefined => {
+    if (!byDb) {
+      const e = engineAt(k);
+      return e ? engineValue(e) : undefined;
+    }
+    if (p <= maxPly) return valueAt(p);
+    const r = cachedFen(f);
+    const total = r ? r.white + r.draws + r.black : 0;
+    return r && total >= MIN_DB_GAMES ? { win: (r.white + r.draws / 2) / total, games: total } : undefined;
   };
-  const here = scoreOf(ply, key);
-  const after = afterFen ? scoreOf(ply + 1, afterKey) : undefined;
-  const asked = losses.cloud.has(key);
+  const here = valueOf(ply, key, fen);
+  const after = afterFen ? valueOf(ply + 1, afterKey, afterFen) : undefined;
+  const engHere = engineAt(key);
+  const engAfter = afterKey ? engineAt(afterKey) : undefined;
 
   const loss = losses.byGame.get(game.id);
   const measured = useMemo(() => new Map<number, LossMove>((loss?.moves ?? []).map((m) => [m.ply, m])), [loss]);
 
-  const engineBest = here?.pv?.[0];
-  const engineLine = here?.pv ? sanLine(fen, here.pv.slice(0, 8)) : [];
-  const db = mine || next ? cachedFen(fen) : undefined;
+  const engineBest = engHere?.pv[0];
+  const engineLine = engHere ? sanLine(fen, engHere.pv.slice(0, 8)) : [];
+  const db = cachedFen(fen);
   const dbList = db ? dbMoves(db, turn) : [];
   const dbTotal = db ? db.white + db.draws + db.black : 0;
   const dbMain = dbList.filter((m) => isMainMove(m, dbTotal, rule));
   const dbBest = dbMain.length ? dbMain.reduce((a, b) => (b.score > a.score ? b : a)) : undefined;
-  const dbPlayed = next ? dbList.find((m) => m.uci === next.uci) : undefined;
+  const dbPlayed = next ? dbList.find((m) => m.san === next.san) : undefined;
 
   const arrows = [
     ...(next ? [{ startSquare: next.uci.slice(0, 2), endSquare: next.uci.slice(2, 4), color: ARROW.played }] : []),
     ...(engineBest && engineBest !== next?.uci ? [{ startSquare: engineBest.slice(0, 2), endSquare: engineBest.slice(2, 4), color: ARROW.engine }] : []),
-    ...(dbBest && dbBest.uci !== next?.uci && dbBest.uci !== engineBest ? [{ startSquare: dbBest.uci.slice(0, 2), endSquare: dbBest.uci.slice(2, 4), color: ARROW.db }] : []),
+    ...(dbBest && dbBest.san !== next?.san && dbBest.uci !== engineBest ? [{ startSquare: dbBest.uci.slice(0, 2), endSquare: dbBest.uci.slice(2, 4), color: ARROW.db }] : []),
   ];
   const prev = ply > 0 ? full.moves[ply - 1] : undefined;
   const squareStyles: Record<string, React.CSSProperties> = prev
@@ -129,16 +138,24 @@ export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFe
 
   // The evaluation curve over the opening, with your measured drops marked.
   const chartPlies = Math.min(last, maxPly);
-  const chartEvals = Array.from({ length: chartPlies + 1 }, (_, p) => evalAt(p)?.score);
+  const chartKeys = useMemo(() => walkGame(game, maxPly).keys, [game, maxPly]);
+  const chartEvals = Array.from({ length: chartPlies + 1 }, (_, p): EngineScore | undefined => {
+    if (!byDb) return chartKeys[p] !== undefined ? engineAt(chartKeys[p]!)?.score : undefined;
+    const v = valueAt(p);
+    return v ? scoreFromWin(v.win) : undefined;
+  });
   const chartCats = Array.from({ length: chartPlies }, (_, i) => {
     const m = measured.get(i + 1);
     const l = m ? dropLabel(m.drop) : null;
     return l ? CATEGORY[l] : undefined;
   });
 
-  const win = (s: EngineScore | undefined) => (s ? winFor(s, game.userColour) : null);
-  const winBefore = win(here?.score);
-  const winAfter = win(after?.score);
+  const side = (white: number) => (game.userColour === 'w' ? white : 1 - white);
+  const win = (v: PlyValue | undefined) => (v ? side(v.win) : null);
+  const winBefore = win(here);
+  const winAfter = win(after);
+  const engWinBefore = engHere ? win(engineValue(engHere)) : null;
+  const engWinAfter = engAfter ? win(engineValue(engAfter)) : null;
   const drop = winBefore !== null && winAfter !== null && mine ? Math.max(0, winBefore - winAfter) : null;
   const label = drop !== null ? dropLabel(drop) : null;
   const orientation = game.userColour === 'w' ? 'white' : 'black';
@@ -147,7 +164,7 @@ export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFe
   const reachedBy = full.moves.slice(0, ply).map((m) => m.san);
 
   const fixFor = (better: string, why: string): Fix => ({
-    line: here?.pv,
+    line: engHere?.pv,
     colour: game.userColour,
     fen,
     reachedBy,
@@ -211,14 +228,18 @@ export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFe
             </h3>
             <p>
               {here ? (
-                <>
-                  {t('player.evalHere', { eval: formatScore(here.score), win: pct(winBefore!) })}
-                  {here.depth ? <span className="small muted"> · {t('player.depth', { d: here.depth })}</span> : null}
-                </>
-              ) : asked ? (
-                t('player.noCloud')
+                here.score ? (
+                  <>
+                    {t('player.evalHere', { eval: formatScore(here.score), win: pct(winBefore!) })}
+                    {here.depth ? <span className="small muted"> · {t('player.depth', { d: here.depth })}</span> : null}
+                  </>
+                ) : (
+                  t('player.dbHere', { win: pct(winBefore!), games: tn('insights.nGames', here.games ?? 0) })
+                )
+              ) : byDb && db ? (
+                t('player.noDbValue', { n: MIN_DB_GAMES })
               ) : (
-                <span className="muted">{t('player.loading')}</span>
+                <span className="muted">{t(byDb ? 'player.dbLoading' : 'player.analysing')}</span>
               )}
             </p>
             {next && (
@@ -226,7 +247,7 @@ export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFe
                 {t(mine ? 'player.youPlayed' : 'player.theyPlayed', { san: next.san })}{' '}
                 {after && winAfter !== null && (
                   <>
-                    {t('player.evalAfter', { eval: formatScore(after.score), win: pct(winAfter) })}
+                    {after.score ? t('player.evalAfter', { eval: formatScore(after.score), win: pct(winAfter) }) : t('player.dbAfter', { win: pct(winAfter), games: tn('insights.nGames', after.games ?? 0) })}
                     {drop !== null && drop >= 0.01 && (
                       <strong className={label && label !== 'inaccuracy' ? 'bad-text' : undefined}> {t('player.drop', { drop: pct(drop) })}{label ? ` · ${t(`loss.${label}`)}` : ''}</strong>
                     )}
@@ -263,10 +284,10 @@ export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFe
                     </thead>
                     <tbody>
                       {dbList.slice(0, 6).map((m) => (
-                        <tr key={m.uci} className={m.uci === next?.uci ? 'highlight' : undefined}>
+                        <tr key={m.uci} className={m.san === next?.san ? 'highlight' : undefined}>
                           <td dir="ltr">
                             {m.uci === dbBest?.uci ? <strong>{m.san}</strong> : m.san}
-                            {m.uci === next?.uci && <span className="small muted"> ← {t('player.played')}</span>}
+                            {m.san === next?.san && <span className="small muted"> ← {t('player.played')}</span>}
                           </td>
                           <td>
                             {m.games.toLocaleString(getLocale())} <span className="small muted">({pct(m.games / Math.max(1, dbTotal))})</span>
@@ -285,11 +306,11 @@ export function GamePlayer({ game, startPly, maxPly, losses, lookupFen, cachedFe
             {next && mine && (engineBest || dbBest) && (
               <div className="row">
                 {engineBest && engineBest !== next.uci && engineSan && (
-                  <button type="button" disabled={fixBusy} onClick={() => onAddFix(fixFor(engineBest, t('fixes.whyEngine', { better: engineSan, played: next.san, before: winBefore !== null ? pct(winBefore) : '?', after: winAfter !== null ? pct(winAfter) : '?' })))}>
+                  <button type="button" disabled={fixBusy} onClick={() => onAddFix(fixFor(engineBest, t('fixes.whyEngine', { better: engineSan, played: next.san, before: engWinBefore !== null ? pct(engWinBefore) : '?', after: engWinAfter !== null ? pct(engWinAfter) : '?' })))}>
                     {t('fixes.add', { san: engineSan })}
                   </button>
                 )}
-                {dbBest && dbBest.uci !== next.uci && dbBest.uci !== engineBest && (
+                {dbBest && dbBest.san !== next.san && dbBest.uci !== engineBest && (
                   <button type="button" disabled={fixBusy} onClick={() => onAddFix(fixFor(dbBest.uci, t('fixes.whyDb', { better: dbBest.san, score: pct(dbBest.score), played: next.san, yours: dbPlayed ? pct(dbPlayed.score) : '—' })))}>
                     {t('fixes.add', { san: dbBest.san })}
                   </button>

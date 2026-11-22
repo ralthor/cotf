@@ -24,7 +24,7 @@ import {
   type WeakSpot,
   walkGame,
 } from '../../core/repertoire/insights';
-import { DROP, dropLabel, winFor, type DropLabel, type LossMove, type OpeningLoss } from '../../core/repertoire/openingLoss';
+import { DROP, dropLabel, MIN_DB_GAMES, winFor, type DropLabel, type LossMove, type LossSource, type OpeningLoss, type PlyValue } from '../../core/repertoire/openingLoss';
 import type { Side } from '../../core/repertoire/types';
 import type { EngineScore } from '../../core/engine/types';
 import { formatScore } from '../../core/scoring/score';
@@ -32,7 +32,7 @@ import { getPref, setPref } from '../../storage/prefs';
 import { afterUci, fixPgn, growReplies, keyOfFen, linePly, MAX_FIX_LOOKUPS, sanOf, type Fix } from './fixes';
 import { GamePlayer } from './GamePlayer';
 import { PACE_MS } from './paced';
-import { useOpeningLosses } from './useOpeningLosses';
+import { LOSS_DEPTHS, useOpeningLosses, type DbAccess } from './useOpeningLosses';
 import { getLocale, t, tn } from '../../i18n';
 import { useT } from '../../i18n/react';
 import { useOpeningGames } from './useOpeningGames';
@@ -47,7 +47,17 @@ const num1 = (x: number) => new Intl.NumberFormat(getLocale(), { maximumFraction
 const sideName = (s: Side) => t(s === 'w' ? 'repertoire.white' : 'repertoire.black');
 const moveNo = (n: PositionNode) => Math.ceil(n.ply / 2) || 1;
 
-type Column<T> = { key: string; label: string; title?: string; sort: (r: T) => number | string; cell: (r: T) => ReactNode };
+type Column<T> = {
+  key: string;
+  label: string;
+  title?: string;
+  sort: (r: T) => number | string;
+  cell: (r: T) => ReactNode;
+  /** Sort ascending on the first click (e.g. earliest move first). */
+  asc?: boolean;
+  /** Breaks ties, always ascending whichever way the column is sorted. */
+  tie?: (r: T) => number;
+};
 
 /** A table sorted by any column; clicking a header sorts by it, again reverses. */
 function SortTable<T>({ rows, columns, initial, rowKey, onOpen, label, detail }: { rows: readonly T[]; columns: Column<T>[]; initial: string; rowKey: (r: T) => string; onOpen: (r: T) => void; label: string; detail?: (r: T) => ReactNode }) {
@@ -59,6 +69,7 @@ function SortTable<T>({ rows, columns, initial, rowKey, onOpen, label, detail }:
       const x = col.sort(a);
       const y = col.sort(b);
       const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+      if (c === 0 && col.tie) return col.tie(a) - col.tie(b);
       return sort.desc ? -c : c;
     });
     return out;
@@ -71,7 +82,7 @@ function SortTable<T>({ rows, columns, initial, rowKey, onOpen, label, detail }:
             <tr>
               {columns.map((c) => (
                 <th key={c.key} aria-sort={sort.key === c.key ? (sort.desc ? 'descending' : 'ascending') : undefined} title={c.title}>
-                  <button type="button" className="link" onClick={() => setSort((s) => ({ key: c.key, desc: s.key === c.key ? !s.desc : true }))}>
+                  <button type="button" className="link" onClick={() => setSort((s) => ({ key: c.key, desc: s.key === c.key ? !s.desc : !c.asc }))}>
                     {c.label}
                     {sort.key === c.key ? (sort.desc ? ' ↓' : ' ↑') : ''}
                   </button>
@@ -214,11 +225,18 @@ function lossColumns(onHide: (r: LossRow) => void, askedBefore: (r: LossRow) => 
           <bdi>{r.game.userColour === 'w' ? r.game.black : r.game.white}</bdi>
           {r.game.opponentRating ? ` (${r.game.opponentRating})` : ''}
           <br />
-          <span className="small muted">
-            {sideName(r.game.userColour)} · {r.game.timeClass ?? ''}
-          </span>
+          <span className="small muted">{r.game.timeClass ?? ''}</span>
         </span>
       ),
+    },
+    {
+      key: 'colour',
+      label: t('loss.col.colour'),
+      title: t('loss.col.colourHelp'),
+      asc: true,
+      sort: (r) => (r.game.userColour === 'w' ? 0 : 1),
+      tie: (r) => r.worst.ply,
+      cell: (r) => sideName(r.game.userColour),
     },
     {
       key: 'result',
@@ -232,9 +250,11 @@ function lossColumns(onHide: (r: LossRow) => void, askedBefore: (r: LossRow) => 
     {
       key: 'move',
       label: t('loss.col.move'),
+      title: t('loss.col.moveHelp'),
+      asc: true,
       sort: (r) => r.worst.ply,
       cell: (r) => {
-        const l = dropLabel(r.worst.drop);
+        const l = r.worst.before.score ? dropLabel(r.worst.drop) : null;
         return (
           <span dir="ltr" className="nowrap">
             <strong>{moveLabel(r.worst.ply, r.worst.san)}</strong>
@@ -253,7 +273,7 @@ function lossColumns(onHide: (r: LossRow) => void, askedBefore: (r: LossRow) => 
           {pct(r.worst.beforeWin)} → {pct(r.worst.afterWin)}
           <br />
           <span className="small muted">
-            {formatScore(r.worst.before)} → {formatScore(r.worst.after)}
+            {basisText(r.worst.before)} → {basisText(r.worst.after)}
           </span>
         </span>
       ),
@@ -274,20 +294,85 @@ function lossColumns(onHide: (r: LossRow) => void, askedBefore: (r: LossRow) => 
   ];
 }
 
+/** What a win chance rests on: the evaluation, or the database games. */
+const basisText = (v: PlyValue) => (v.score ? formatScore(v.score) : tn('insights.nGames', v.games ?? 0));
+
+/** The smallest drops the list can be limited to: 5%, then what Lichess calls an inaccuracy, a mistake, a blunder. */
+const MIN_DROPS = { small: 0.05, ...DROP } as const;
+type MinDrop = keyof typeof MIN_DROPS;
+
 const LOSS_SUFFIX: Record<DropLabel, string> = { inaccuracy: '?!', mistake: '?', blunder: '??' };
 
 const lossSentence = (r: LossRow) => {
   const best = bestSan(r);
   const l = dropLabel(r.worst.drop);
+  const byEngine = !!r.worst.before.score;
   return [
-    t('loss.sentence', { move: moveLabel(r.worst.ply, r.worst.san), before: pct(r.worst.beforeWin), after: pct(r.worst.afterWin), label: l ? t(`loss.${l}`) : t('loss.small') }),
-    r.worst.beforePly !== r.worst.ply - 1 ? t('loss.twoPlies') : '',
-    best ? t('loss.bestWas', { best }) : '',
+    byEngine
+      ? t('loss.sentence', { move: moveLabel(r.worst.ply, r.worst.san), before: pct(r.worst.beforeWin), after: pct(r.worst.afterWin), label: l ? t(`loss.${l}`) : t('loss.small') })
+      : t('loss.sentenceDb', { move: moveLabel(r.worst.ply, r.worst.san), before: pct(r.worst.beforeWin), after: pct(r.worst.afterWin), games: tn('insights.nGames', r.worst.after.games ?? 0) }),
+    best ? t(byEngine ? 'loss.bestWas' : 'loss.bestDb', { best }) : '',
     r.end ? t('loss.endAt', { move: Math.ceil(r.end.ply / 2) || 1, win: pct(r.end.win) }) : '',
   ]
     .filter(Boolean)
     .join(' ');
 };
+
+/** Games that reached the same mistake by the same moves: the move order once, the games under it. */
+type LossGroup = { id: string; colour: Side; sans: string[]; worst: LossMove; rows: LossRow[]; lost: number; drop: number; best: string | null };
+
+/** Groups the rows by your colour and the moves up to and including your worst move; newest game first in each. */
+function groupLosses(rows: readonly LossRow[]): LossGroup[] {
+  const groups = new Map<string, LossRow[]>();
+  for (const r of rows) {
+    const id = `${r.game.userColour}|${r.game.moves.slice(0, r.worst.ply).map((m) => m.san).join(' ')}`;
+    const g = groups.get(id);
+    if (g) g.push(r);
+    else groups.set(id, [r]);
+  }
+  return [...groups].map(([id, rs]) => {
+    rs.sort((a, b) => b.game.playedAt.localeCompare(a.game.playedAt));
+    const first = rs[0]!;
+    return {
+      id,
+      colour: first.game.userColour,
+      sans: first.game.moves.slice(0, first.worst.ply).map((m) => m.san),
+      worst: first.worst,
+      rows: rs,
+      lost: rs.filter((r) => userScore(r.game) === 0).length,
+      drop: rs.reduce((a, r) => a + r.worst.drop, 0) / rs.length,
+      best: rs.map(bestSan).find(Boolean) ?? null,
+    };
+  });
+}
+
+function groupColumns(): Column<LossGroup>[] {
+  return [
+    { key: 'colour', label: t('loss.col.colour'), title: t('loss.col.colourHelp'), asc: true, sort: (r) => (r.colour === 'w' ? 0 : 1), tie: (r) => r.worst.ply, cell: (r) => sideName(r.colour) },
+    {
+      key: 'order',
+      label: t('loss.col.order'),
+      title: t('loss.col.moveHelp'),
+      asc: true,
+      sort: (r) => r.worst.ply,
+      cell: (r) => {
+        // The whole order, with your mistake (its last move) in bold.
+        const text = orderLine(r.sans);
+        const cut = text.length - r.worst.san.length;
+        return (
+          <span dir="ltr">
+            <span className="muted">{text.slice(0, cut)}</span>
+            <strong>{r.worst.san}</strong>
+          </span>
+        );
+      },
+    },
+    { key: 'games', label: t('insights.db.games'), sort: (r) => r.rows.length, cell: (r) => r.rows.length },
+    { key: 'lost', label: t('loss.col.lost'), sort: (r) => r.lost, cell: (r) => r.lost },
+    { key: 'drop', label: t('loss.col.avgDrop'), title: t('loss.col.dropHelp'), sort: (r) => r.drop, cell: (r) => <strong>−{pct(r.drop)}</strong> },
+    { key: 'best', label: t('loss.col.best'), sort: (r) => r.best ?? '', cell: (r) => <span dir="ltr">{r.best ?? '—'}</span> },
+  ];
+}
 
 const resultOf = (g: OpeningGame) => {
   const s = userScore(g);
@@ -757,7 +842,11 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
   const og = useOpeningGames();
   const ins = useInsights(og.games);
   const f = ins.filters;
-  const losses = useOpeningLosses(ins.filtered, f.maxMove * 2, f.scanGames);
+  const dbAccess = useMemo<DbAccess>(
+    () => ({ cachedFen: ins.cachedFen, loadFens: ins.loadFens, fetchFen: ins.fetchFen, rule: ins.rule, version: ins.lookups }),
+    [ins.cachedFen, ins.loadFens, ins.fetchFen, ins.rule, ins.lookups],
+  );
+  const losses = useOpeningLosses(ins.filtered, f.maxMove * 2, f.scanGames, dbAccess);
   const fb = useFixBuilder(ins, onAddFix);
   const [list, setListState] = useState<List>(() => {
     const v = getPref('insightsList');
@@ -786,22 +875,59 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
     (n: PositionNode, uci: string) => {
       const fen = afterUci(n.fen, uci);
       if (!fen) return undefined;
-      return losses.cloud.get(keyOfFen(fen))?.score;
+      return losses.evals.get(keyOfFen(fen))?.score;
     },
-    [losses.cloud],
+    [losses.evals],
   );
   const spotCols = useMemo(() => spotColumns(), []);
   const impCols = useMemo(() => improvementColumns(evalAfter, (r) => hide(impId(r))), [evalAfter, hide]);
-  const askedBefore = useCallback((r: LossRow) => losses.cloud.has(keyOfFen(fenBefore(r))), [losses.cloud]);
+  const { cachedFen } = ins;
+  const askedBefore = useCallback(
+    (r: LossRow) => (losses.source === 'engine' ? losses.evals.has(keyOfFen(fenBefore(r))) : !!cachedFen(fenBefore(r))),
+    [losses.source, losses.evals, cachedFen],
+  );
   const lossCols = useMemo(() => lossColumns((r) => hide(lossId(r)), askedBefore), [hide, askedBefore]);
+  const groupCols = useMemo(() => groupColumns(), []);
+  const [byOrder, setByOrderState] = useState(() => getPref('lossView') === 'orders');
+  const setByOrder = (v: boolean) => {
+    setByOrderState(v);
+    setPref('lossView', v ? 'orders' : null);
+  };
 
-  const minDrop = DROP[f.minDrop];
+  const minDrop = MIN_DROPS[f.minDrop] ?? DROP.inaccuracy;
   const lossRows = useMemo(
     () =>
       losses.losses.filter(
         (l): l is LossRow => !!l.worst && l.worst.drop >= minDrop && (!f.notWon || userScore(l.game) !== 1) && showHidden === hidden.has(lossId(l)),
       ),
     [losses.losses, minDrop, f.notWon, hidden, showHidden],
+  );
+  const lossGroups = useMemo(() => groupLosses(lossRows), [lossRows]);
+  const date = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium' });
+  /** The games of a move order, each opening the player at the mistake. */
+  const groupGames = (g: LossGroup) => (
+    <ul className="group-games">
+      {g.rows.map((r) => {
+        const x = resultOf(r.game);
+        return (
+          <li key={r.game.id}>
+            <button
+              type="button"
+              className="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPlayer({ gameId: r.game.id, ply: r.worst.ply - 1 });
+              }}
+            >
+              {date.format(new Date(r.game.playedAt))} · <bdi>{r.game.userColour === 'w' ? r.game.black : r.game.white}</bdi>
+              {r.game.opponentRating ? ` (${r.game.opponentRating})` : ''}
+            </button>{' '}
+            <span className={x === 'won' ? 'good-text' : x === 'lost' ? 'bad-text' : ''}>{t(`insights.${x}`)}</span>
+            <span className="muted"> · −{pct(r.worst.drop)}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
   const hiddenLosses = losses.losses.filter((l) => hidden.has(lossId(l))).length;
   const impRows = useMemo(() => ins.improvements.filter((r) => showHidden === hidden.has(impId(r))), [ins.improvements, hidden, showHidden]);
@@ -814,11 +940,11 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
       for (const u of [r.yours.uci, r.better.uci]) {
         const fen = afterUci(r.node.fen, u);
         const k = fen ? keyOfFen(fen) : '';
-        if (fen && k && !losses.cloud.has(k)) out.set(k, fen);
+        if (fen && k && !losses.evals.has(k)) out.set(k, fen);
       }
     }
     return [...out].map(([key, fen]) => ({ key, fen }));
-  }, [ins.improvements, losses.cloud]);
+  }, [ins.improvements, losses.evals]);
 
   if (!og.loaded) return null;
   if (!og.games.length) {
@@ -899,17 +1025,28 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
               <option value="b">{sideName('b')}</option>
             </select>
           </label>
-          <label className="field-inline">
-            {t('games.timeClass')}
-            <select value={f.timeClass} onChange={(e) => ins.setFilters({ timeClass: e.target.value })}>
-              <option value="">{t('games.allTimeClasses')}</option>
+          <div className="field-inline">
+            <span id="insights-tc">{t('games.timeClass')}</span>
+            <div className="segmented wrap" role="group" aria-labelledby="insights-tc">
+              <button type="button" aria-pressed={!f.timeClasses.length} onClick={() => ins.setFilters({ timeClasses: [] })}>
+                {t('games.allTimeClasses')}
+              </button>
               {TIME_CLASSES.map((c) => (
-                <option key={c} value={c}>
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={f.timeClasses.includes(c)}
+                  onClick={() => {
+                    const on = f.timeClasses.includes(c) ? f.timeClasses.filter((x) => x !== c) : [...f.timeClasses, c];
+                    // Every one picked is the same as all.
+                    ins.setFilters({ timeClasses: on.length === TIME_CLASSES.length ? [] : TIME_CLASSES.filter((x) => on.includes(x)) });
+                  }}
+                >
                   {t(`games.tc.${c}`)}
-                </option>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
           <label className="field-inline">
             {t('insights.upToMove')}
             <input type="number" min={2} max={40} value={f.maxMove} onChange={(e) => ins.setFilters({ maxMove: Math.max(2, Math.min(40, Number(e.target.value) || 15)) })} />
@@ -947,6 +1084,37 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
           <h2 id="insights-losses">{t('loss.title')}</h2>
           <p className="small muted">{t('loss.help')}</p>
           <div className="row">
+            <div className="segmented" role="group" aria-label={t('loss.sourceLabel')}>
+              {(['engine', 'database'] as LossSource[]).map((s) => (
+                <button key={s} type="button" aria-pressed={losses.source === s} disabled={!!losses.scan} onClick={() => losses.setSource(s)}>
+                  {t(`loss.from.${s}`)}
+                </button>
+              ))}
+            </div>
+            {losses.source === 'engine' ? (
+              <label className="field-inline">
+                {t('loss.depth')}
+                <select value={losses.depth} disabled={!!losses.scan} onChange={(e) => losses.setDepth(Number(e.target.value))}>
+                  {LOSS_DEPTHS.map((d, i) => (
+                    <option key={d} value={d}>
+                      {t(`loss.depthName.${i}`, { d })}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <div className="segmented" role="group" aria-label={t('insights.database')}>
+                {dbs.map((d) => (
+                  <button key={d} type="button" aria-pressed={ins.db === d} disabled={(d === 'lichess' && !ins.hasToken) || !!losses.scan} onClick={() => ins.chooseDb(d)}>
+                    {t(`explorer.db.${d}`)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="small muted">{losses.source === 'engine' ? t('loss.fromHelp.engine') : t('loss.fromHelp.database', { db: dbName, n: MIN_DB_GAMES })}</p>
+          {losses.source === 'database' && !ins.hasToken && <p className="small">{t('insights.needToken')}</p>}
+          <div className="row">
             <label className="field-inline">
               {t('loss.games')}
               <select value={f.scanGames} onChange={(e) => ins.setFilters({ scanGames: Number(e.target.value) })}>
@@ -959,10 +1127,10 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
             </label>
             <label className="field-inline">
               {t('loss.atLeast')}
-              <select value={f.minDrop} onChange={(e) => ins.setFilters({ minDrop: e.target.value as DropLabel })}>
-                {(Object.keys(DROP) as DropLabel[]).map((k) => (
+              <select value={f.minDrop} onChange={(e) => ins.setFilters({ minDrop: e.target.value as MinDrop })}>
+                {(Object.keys(MIN_DROPS) as MinDrop[]).map((k) => (
                   <option key={k} value={k}>
-                    {t(`loss.${k}`)} (−{pct(DROP[k])})
+                    {losses.source === 'engine' && k !== 'small' ? `${t(`loss.${k}`)} (−${pct(MIN_DROPS[k])})` : `−${pct(MIN_DROPS[k])}`}
                   </option>
                 ))}
               </select>
@@ -984,21 +1152,41 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
               losses.loaded &&
               losses.todo > 0 && (
                 <button type="button" className="primary" onClick={() => void losses.startScan()}>
-                  {tn('loss.scan', losses.todo, { min: minutes(losses.todo) })}
+                  {losses.source === 'engine' ? tn('loss.analyse', losses.todo) : tn('loss.scan', losses.todo, { min: minutes(losses.todo) })}
                 </button>
               )
             )}
             {hiddenToggle(hiddenLosses)}
           </div>
           <p className="small muted">
-            {t('loss.coverage', {
+            {t(losses.source === 'engine' ? 'loss.coverage' : 'loss.coverageDb', {
               games: losses.recent.length,
               known: losses.losses.reduce((a, l) => a + l.known, 0),
               wanted: losses.losses.reduce((a, l) => a + l.wanted, 0),
             })}
           </p>
-          {losses.error && <p className="small fail">{t(`explorer.error.${losses.error}`)}</p>}
-          {lossRows.length ? (
+          {losses.error && <p className="small fail">{losses.error === 'engine' ? t('loss.engineError') : t(`explorer.error.${losses.error}`)}</p>}
+          {lossRows.length > 0 && (
+            <div className="segmented" role="group" aria-label={t('loss.view')}>
+              <button type="button" aria-pressed={!byOrder} onClick={() => setByOrder(false)}>
+                {t('loss.byGame')} ({lossRows.length})
+              </button>
+              <button type="button" aria-pressed={byOrder} onClick={() => setByOrder(true)}>
+                {t('loss.byOrder')} ({lossGroups.length})
+              </button>
+            </div>
+          )}
+          {lossRows.length && byOrder ? (
+            <SortTable
+              rows={lossGroups}
+              columns={groupCols}
+              initial="games"
+              rowKey={(g) => g.id}
+              onOpen={(g) => setPlayer({ gameId: g.rows[0]!.game.id, ply: g.worst.ply - 1 })}
+              label={t('loss.byOrder')}
+              detail={groupGames}
+            />
+          ) : lossRows.length ? (
             <SortTable
               rows={lossRows}
               columns={lossCols}
@@ -1009,7 +1197,7 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
               detail={lossSentence}
             />
           ) : (
-            <p>{losses.todo && !losses.scan ? t('loss.notScanned') : t('loss.none')}</p>
+            <p>{losses.todo && !losses.scan ? t(losses.source === 'engine' ? 'loss.notScanned' : 'loss.notScannedDb') : t('loss.none')}</p>
           )}
         </section>
       ) : list === 'spots' ? (
@@ -1049,7 +1237,7 @@ export function InsightsView({ onFetch, onAddFix, onPractise, hasFixes }: Insigh
               )
             )}
             {!losses.scan && impEvalTodo.length > 0 && (
-              <button type="button" onClick={() => void losses.lookupMany(impEvalTodo)}>
+              <button type="button" onClick={() => void losses.analyseList(impEvalTodo)}>
                 {t('insights.evalScan', { n: impEvalTodo.length })}
               </button>
             )}

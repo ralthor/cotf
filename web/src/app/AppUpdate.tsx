@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { t } from '../i18n';
 import { useT } from '../i18n/react';
+import { DB_BLOCKED_EVENT, isDbBlocked } from '../storage/db';
 
 /** How often an open app checks for a new version (ms). */
 const CHECK_EVERY = 60 * 60 * 1000;
@@ -85,5 +86,25 @@ export function InstallButton() {
     >
       {t('pwa.install')}
     </button>
+  );
+}
+
+/** Shown when saving waits because another tab still has the app's older storage open. */
+export function DbBlocked() {
+  useT();
+  const [blocked, setBlocked] = useState(isDbBlocked);
+  useEffect(() => {
+    const on = () => setBlocked(isDbBlocked());
+    window.addEventListener(DB_BLOCKED_EVENT, on);
+    return () => window.removeEventListener(DB_BLOCKED_EVENT, on);
+  }, []);
+  if (!blocked) return null;
+  return (
+    <div className="toast" role="alert">
+      <span>{t('db.blocked')}</span>
+      <button type="button" onClick={() => location.reload()}>
+        {t('pwa.reload')}
+      </button>
+    </div>
   );
 }

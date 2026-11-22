@@ -1,167 +1,292 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEngine } from '../../app/EngineContext';
+import { forEachConcurrent } from '../../core/engine/EnginePool';
 import type { OpeningGame } from '../../core/repertoire/games';
-import { walkGame } from '../../core/repertoire/insights';
-import { openingLoss, pgnEvals, pliesToLookUp, refinePly, type EvalAt, type OpeningLoss } from '../../core/repertoire/openingLoss';
-import { cloudEvalStore } from '../../storage/db';
-import { cloudEval, type CloudEval } from './cloudEval';
+import { walkGame, type ImprovementRule } from '../../core/repertoire/insights';
+import { dbPliesNeeded, dbValueAt, engineValue, openingLoss, type LossSource, type OpeningLoss, type ValueAt } from '../../core/repertoire/openingLoss';
+import { engineEvalStore, type EngineEval } from '../../storage/db';
+import { getPref, setPref } from '../../storage/prefs';
+import type { Analyser } from '../explore/grade';
+import type { ExplorerResult } from './explorer';
 import { runPaced, type PacedProgress } from './paced';
 
-/** A position Lichess had no evaluation for is asked again after this long. */
-const RETRY_MISS_MS = 30 * 24 * 3600 * 1000;
-/** Rounds of "make the worst move exact": each can move the worst move to another one. */
-const REFINE_ROUNDS = 3;
+/** Engine depths offered: quick, normal, deep. */
+export const LOSS_DEPTHS = [10, 14, 18] as const;
+const DEFAULT_DEPTH = 14;
+/** Rounds of database lookups: the positions before your moves, then after the rare ones. */
+const DB_ROUNDS = 2;
 
-export type CloudMap = ReadonlyMap<string, CloudEval | null>;
+export type EvalMap = ReadonlyMap<string, EngineEval>;
 
-const pgnEvalCache = new WeakMap<OpeningGame, ReturnType<typeof pgnEvals>>();
-const pgnEvalsOf = (g: OpeningGame) => {
-  let m = pgnEvalCache.get(g);
-  if (!m) pgnEvalCache.set(g, (m = pgnEvals(g.pgn)));
-  return m;
+/** The database side, from `useInsights`: saved answers by FEN, loading saved ones, and fetching. */
+export type DbAccess = {
+  cachedFen: (fen: string) => ExplorerResult | undefined;
+  loadFens: (fens: readonly string[]) => Promise<void>;
+  fetchFen: (fen: string, signal?: AbortSignal) => Promise<ExplorerResult>;
+  rule: ImprovementRule;
+  /** Changes whenever the saved answers change. */
+  version: unknown;
 };
 
-/** Evaluations for a game's plies: the game's own (analysed on Lichess) first, then cloud ones. */
-export function evalAtFor(game: OpeningGame, maxPly: number, cloud: CloudMap): EvalAt {
-  const own = pgnEvalsOf(game);
-  const keys = walkGame(game, maxPly).keys;
-  return (ply) => {
-    const c = keys[ply] !== undefined ? cloud.get(keys[ply]!) : undefined;
-    const o = own.get(ply);
-    if (c) return { score: o ?? c.score, pv: c.pv };
-    return o ? { score: o } : undefined;
-  };
+const evalKey = (posKey: string, depth: number) => `${posKey}|${depth}`;
+
+/** One engine search: the score (White's view) and line, or null for a finished game. */
+async function analyse(engine: Analyser, fen: string, depth: number, signal?: AbortSignal): Promise<EngineEval | null> {
+  const r = await engine.analyse({ fen, depth, multiPv: 1 }, { signal });
+  const l = r.lines[0];
+  return l ? { score: l.score, depth: l.depth, pv: l.pvUci.slice(0, 12) } : null;
 }
 
-/** Position keys and FENs a game still needs from the cloud for its first pass. */
-function missing(game: OpeningGame, maxPly: number, plies: readonly number[], cloud: CloudMap): { key: string; fen: string }[] {
-  const own = pgnEvalsOf(game);
-  const w = walkGame(game, maxPly);
-  return plies.flatMap((p) => (own.has(p) && p !== 0 ? [] : w.keys[p] !== undefined && !cloud.has(w.keys[p]!) ? [{ key: w.keys[p]!, fen: w.fens[p]! }] : []));
+function readSource(): LossSource {
+  return getPref('lossSource') === 'database' ? 'database' : 'engine';
+}
+function readDepth(): number {
+  const d = Number(getPref('lossDepth'));
+  return (LOSS_DEPTHS as readonly number[]).includes(d) ? d : DEFAULT_DEPTH;
 }
 
 /**
- * Where your recent games went wrong in the opening, from Lichess cloud evaluations (kept in
- * IndexedDB) and the evaluations of games you had analysed on Lichess. `games` newest first.
+ * Where your recent games went wrong in the opening: from Stockfish in this browser (evaluations
+ * kept in IndexedDB) or from the opening database's results. `games` in any order.
  */
-export function useOpeningLosses(games: readonly OpeningGame[], maxPly: number, scanGames: number) {
+export function useOpeningLosses(games: readonly OpeningGame[], maxPly: number, scanGames: number, db: DbAccess) {
   const recent = useMemo(
     () => [...games].filter((g) => g.result !== '*').sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, scanGames),
     [games, scanGames],
   );
-  const [cloud, setCloud] = useState<CloudMap>(new Map());
-  const [loadedFor, setLoadedFor] = useState<unknown>(null);
+  const [source, setSourceState] = useState<LossSource>(readSource);
+  const [depth, setDepthState] = useState<number>(readDepth);
+  const setSource = (s: LossSource) => {
+    setPref('lossSource', s);
+    setSourceState(s);
+  };
+  const setDepth = (d: number) => {
+    setPref('lossDepth', String(d));
+    setDepthState(d);
+  };
+  const { getEngine } = useEngine();
+  const [evals, setEvals] = useState<EvalMap>(new Map());
+  const [loadedFor, setLoadedFor] = useState<{ recent: unknown; depth: number; source: LossSource } | null>(null);
   const [scan, setScan] = useState<PacedProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
 
-  // Cached evaluations for every position of these games in the opening (both sides: the game player uses them too).
+  // Saved answers for every position of these games in the opening (both sides: the game player uses them too).
+  const { loadFens } = db;
   useEffect(() => {
     let live = true;
     void (async () => {
       const keys = new Set<string>();
-      for (const g of recent) for (const k of walkGame(g, maxPly).keys) keys.add(k);
-      const got = await cloudEvalStore.getMany([...keys]);
-      const now = Date.now();
-      const map = new Map<string, CloudEval | null>();
-      for (const [k, v] of got) if (v.eval || now - Date.parse(v.at) < RETRY_MISS_MS) map.set(k, v.eval);
+      const fens = new Set<string>();
+      for (const g of recent) {
+        const w = walkGame(g, maxPly);
+        for (const k of w.keys) keys.add(k);
+        if (source === 'database') for (const f of w.fens) fens.add(f);
+      }
+      if (source === 'database') await loadFens([...fens]);
+      const got = await engineEvalStore.getMany([...keys].map((k) => evalKey(k, depth)));
+      const map = new Map<string, EngineEval>();
+      for (const k of keys) {
+        const e = got.get(evalKey(k, depth));
+        if (e) map.set(k, e);
+      }
       if (live) {
-        setCloud((old) => new Map([...map, ...old]));
-        setLoadedFor(recent);
+        setEvals(map);
+        setLoadedFor({ recent, depth, source });
       }
     })();
     return () => {
       live = false;
     };
-  }, [recent, maxPly]);
+  }, [recent, maxPly, depth, source, loadFens]);
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  const losses = useMemo(() => recent.map((g) => openingLoss(g, maxPly, evalAtFor(g, maxPly, cloud))), [recent, maxPly, cloud]);
+  /** The value of each ply of a game, from the chosen source. */
+  const { cachedFen, rule, version } = db;
+  const valueFor = useCallback(
+    (game: OpeningGame): ValueAt => {
+      const w = walkGame(game, maxPly);
+      if (source === 'database') return dbValueAt(game, maxPly, (p) => (w.fens[p] ? cachedFen(w.fens[p]!) : undefined), rule);
+      return (p) => {
+        const e = w.keys[p] !== undefined ? evals.get(w.keys[p]!) : undefined;
+        return e ? engineValue(e) : undefined;
+      };
+    },
+    // `version` changes with the saved database answers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [source, maxPly, evals, cachedFen, rule, version],
+  );
 
-  /** Positions still to look up: the first pass, and the position before each game's worst move; without repeats. */
-  const todo = useMemo(() => {
+  const losses = useMemo(() => recent.map((g) => openingLoss(g, maxPly, valueFor(g))), [recent, maxPly, valueFor]);
+
+  /** Positions still to look at, without repeats. */
+  const todoItems = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const g of recent) for (const m of missing(g, maxPly, pliesToLookUp(g, maxPly), cloud)) if (!seen.has(m.key)) seen.set(m.key, m.fen);
-    for (const l of losses) {
-      const p = refinePly(l);
-      const w = walkGame(l.game, maxPly);
-      if (p !== null && !cloud.has(w.keys[p]!)) seen.set(w.keys[p]!, w.fens[p]!);
+    for (const g of recent) {
+      const w = walkGame(g, maxPly);
+      const last = Math.min(maxPly, w.keys.length - 1);
+      if (source === 'engine') {
+        for (let p = 0; p <= last; p++) if (!evals.has(w.keys[p]!)) seen.set(w.keys[p]!, w.fens[p]!);
+      } else {
+        const resultAt = (p: number) => cachedFen(w.fens[p]!);
+        for (const p of dbPliesNeeded(g, maxPly, resultAt, (p) => !!resultAt(p))) seen.set(w.fens[p]!, w.fens[p]!);
+      }
     }
     return [...seen].map(([key, fen]) => ({ key, fen }));
-  }, [recent, maxPly, cloud, losses]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recent, maxPly, source, evals, cachedFen, version]);
 
-  const fetchOne = useCallback(async (key: string, fen: string, signal?: AbortSignal) => {
-    const e = await cloudEval.get(fen, signal);
-    await cloudEvalStore.put(key, e);
-    setCloud((m) => new Map(m).set(key, e));
-    return e;
+  // Engine results arrive fast; they are shown in batches.
+  const pending = useRef(new Map<string, EngineEval>());
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useCallback(() => {
+    flushTimer.current = null;
+    const add = pending.current;
+    pending.current = new Map();
+    if (add.size) setEvals((m) => new Map([...m, ...add]));
   }, []);
+  const remember = useCallback(
+    (key: string, e: EngineEval) => {
+      pending.current.set(key, e);
+      void engineEvalStore.put(evalKey(key, depth), e);
+      flushTimer.current ??= setTimeout(flush, 400);
+    },
+    [depth, flush],
+  );
 
-  /** Looks up the positions still missing, then the ones that make each game's worst move exact. */
-  const startScan = useCallback(async () => {
-    abort.current?.abort();
-    const ctl = new AbortController();
-    abort.current = ctl;
-    setError(null);
-    // The scan keeps its own copy, so each round sees what the last one found.
-    let known = new Map(cloud);
-    const put = async (it: { key: string; fen: string }, signal: AbortSignal) => {
-      const e = await fetchOne(it.key, it.fen, signal);
-      known = new Map(known).set(it.key, e);
-    };
-    try {
-      let err = await runPaced(todo, put, ctl.signal, setScan);
-      for (let round = 0; round < REFINE_ROUNDS && !err && !ctl.signal.aborted; round++) {
-        const more = new Map<string, string>();
-        for (const g of recent) {
-          const p = refinePly(openingLoss(g, maxPly, evalAtFor(g, maxPly, known)));
-          const w = walkGame(g, maxPly);
-          if (p !== null && !known.has(w.keys[p]!)) more.set(w.keys[p]!, w.fens[p]!);
+  /** Analyses positions with the engines in this browser, each game's positions on one engine in order. */
+  const analyseMany = useCallback(
+    async (groups: { key: string; fen: string }[][], ctl: AbortController) => {
+      const pool = await getEngine();
+      const total = groups.reduce((a, g) => a + g.length, 0);
+      const started = new Set<string>();
+      let done = 0;
+      setScan({ done, total });
+      await forEachConcurrent(groups, pool.size, async (group) => {
+        const mine = group.filter((it) => !started.has(it.key));
+        for (const it of mine) started.add(it.key);
+        if (!mine.length || ctl.signal.aborted) {
+          done += group.length;
+          return;
         }
-        if (!more.size) break;
-        err = await runPaced([...more].map(([key, fen]) => ({ key, fen })), put, ctl.signal, setScan);
-      }
-      if (err) setError(err);
-    } finally {
-      if (abort.current === ctl) abort.current = null;
-      setScan(null);
-    }
-  }, [cloud, todo, recent, maxPly, fetchOne]);
+        done += group.length - mine.length;
+        await pool.withEngine(async (engine) => {
+          for (const it of mine) {
+            if (ctl.signal.aborted) return;
+            const e = await analyse(engine, it.fen, depth, ctl.signal);
+            if (e) remember(it.key, e);
+            setScan({ done: ++done, total });
+          }
+        }, ctl.signal);
+      });
+    },
+    [getEngine, depth, remember],
+  );
 
-  const stopScan = useCallback(() => abort.current?.abort(), []);
-
-  /** Looks up a list of positions, paced (the engine column of the better-moves table). */
-  const lookupMany = useCallback(
-    async (items: readonly { key: string; fen: string }[]) => {
+  const run = useCallback(
+    async (work: (ctl: AbortController) => Promise<string | null | void>) => {
       abort.current?.abort();
       const ctl = new AbortController();
       abort.current = ctl;
       setError(null);
       try {
-        const err = await runPaced(items, async (it, signal) => void (await fetchOne(it.key, it.fen, signal)), ctl.signal, setScan);
+        const err = await work(ctl);
         if (err) setError(err);
+      } catch {
+        if (!ctl.signal.aborted) setError('engine');
       } finally {
+        if (flushTimer.current) clearTimeout(flushTimer.current);
+        flush();
         if (abort.current === ctl) abort.current = null;
         setScan(null);
       }
     },
-    [fetchOne],
+    [flush],
   );
 
-  /** One position now (the game player), unless it is known. */
-  const lookupOne = useCallback(
-    async (key: string, fen: string) => {
-      if (cloud.has(key)) return cloud.get(key) ?? null;
-      try {
-        return await fetchOne(key, fen);
-      } catch {
+  /** Looks at the positions still missing. */
+  const startScan = useCallback(
+    () =>
+      run(async (ctl) => {
+        if (source === 'engine') {
+          const groups = recent.map((g) => {
+            const w = walkGame(g, maxPly);
+            const last = Math.min(maxPly, w.keys.length - 1);
+            const out: { key: string; fen: string }[] = [];
+            for (let p = 0; p <= last; p++) if (!evals.has(w.keys[p]!)) out.push({ key: w.keys[p]!, fen: w.fens[p]! });
+            return out;
+          });
+          return analyseMany(groups.filter((g) => g.length), ctl);
+        }
+        // Database: the positions before your moves, then the ones after moves too rare in that list.
+        const got = new Map<string, ExplorerResult>();
+        const resultOf = (fen: string) => got.get(fen) ?? cachedFen(fen);
+        for (let round = 0; round < DB_ROUNDS && !ctl.signal.aborted; round++) {
+          const need = new Set<string>();
+          for (const g of recent) {
+            const w = walkGame(g, maxPly);
+            const at = (p: number) => resultOf(w.fens[p]!);
+            for (const p of dbPliesNeeded(g, maxPly, at, (p) => !!at(p))) need.add(w.fens[p]!);
+          }
+          if (!need.size) break;
+          const err = await runPaced([...need], async (fen, signal) => void got.set(fen, await db.fetchFen(fen, signal)), ctl.signal, setScan);
+          if (err) return err;
+        }
         return null;
+      }),
+    [run, source, recent, maxPly, evals, analyseMany, cachedFen, db],
+  );
+
+  const stopScan = useCallback(() => abort.current?.abort(), []);
+
+  /** Engine evaluations for a list of positions (the better-moves table). */
+  const analyseList = useCallback(
+    (items: readonly { key: string; fen: string }[]) => run((ctl) => analyseMany(items.map((it) => [it]), ctl)),
+    [run, analyseMany],
+  );
+
+  /** One position now, with the engine (the game player), unless it is known. */
+  const one = useRef<AbortController | null>(null);
+  const analyseOne = useCallback(
+    async (key: string, fen: string) => {
+      if (evals.has(key)) return;
+      one.current?.abort();
+      const ctl = new AbortController();
+      one.current = ctl;
+      try {
+        const pool = await getEngine();
+        const e = await analyse(pool, fen, depth, ctl.signal);
+        if (e && !ctl.signal.aborted) {
+          void engineEvalStore.put(evalKey(key, depth), e);
+          setEvals((m) => new Map(m).set(key, e));
+        }
+      } catch {
+        // cancelled, or the engine failed: the player shows "not analysed"
       }
     },
-    [cloud, fetchOne],
+    [evals, getEngine, depth],
   );
 
   const byGame = useMemo(() => new Map<string, OpeningLoss>(losses.map((l) => [l.game.id, l])), [losses]);
 
-  return { recent, losses, byGame, cloud, loaded: loadedFor === recent, todo: todo.length, scan, startScan, stopScan, lookupMany, error, lookupOne };
+  return {
+    recent,
+    losses,
+    byGame,
+    evals,
+    valueFor,
+    source,
+    setSource,
+    depth,
+    setDepth,
+    loaded: loadedFor?.recent === recent && loadedFor.depth === depth && loadedFor.source === source,
+    todo: todoItems.length,
+    scan,
+    startScan,
+    stopScan,
+    analyseList,
+    analyseOne,
+    error,
+  };
 }

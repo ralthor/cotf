@@ -9,7 +9,7 @@ import { logKey, type BackupData } from '../core/repertoire/backup';
 import type { OpeningGame } from '../core/repertoire/games';
 import type { MoveGrade } from '../features/explore/grade';
 import type { ExplorerResult } from '../features/repertoire/explorer';
-import type { CloudEval } from '../features/repertoire/cloudEval';
+import type { EngineScore } from '../core/engine/types';
 
 interface AnalyserDB extends DBSchema {
   games: { key: string; value: GameRecord; indexes: { importedAt: string } };
@@ -32,12 +32,15 @@ interface AnalyserDB extends DBSchema {
   moveGrades: { key: string; value: MoveGrade };
   /** Opening explorer answers by request URL, with when they were fetched. */
   explorer: { key: string; value: { result: ExplorerResult; at: string } };
-  // Version 6: Lichess cloud evaluations by position key (null: not analysed on Lichess when asked).
-  cloudEvals: { key: string; value: { eval: CloudEval | null; at: string } };
+  // Version 7: evaluations by this browser's engine, by `positionKey|depth` (version 6's Lichess cloud evaluations are dropped).
+  engineEvals: { key: string; value: EngineEval };
 }
 
 export const DB_NAME = 'chess-analyser';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
+
+/** One engine evaluation of a position: the score (White's view), its depth and the engine's line. */
+export type EngineEval = { score: EngineScore; depth: number; pv: string[] };
 /** Games kept for the repertoire comparison; the oldest are dropped. */
 export const MAX_OPENING_GAMES = 2000;
 const MAX_GAMES = 500;
@@ -48,8 +51,14 @@ let dbPromise: Promise<IDBPDatabase<AnalyserDB> | null> | null = null;
 export function getDb(): Promise<IDBPDatabase<AnalyserDB> | null> {
   if (!dbPromise) {
     if (typeof indexedDB === 'undefined') return (dbPromise = Promise.resolve(null));
+    // Opening normally takes milliseconds; a long wait means another tab holds an older version
+    // (browsers do not always send "blocked", e.g. to a page in a background tab).
+    const slow = setTimeout(() => {
+      dbBlocked = true;
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(DB_BLOCKED_EVENT));
+    }, BLOCKED_AFTER_MS);
     dbPromise = openDB<AnalyserDB>(DB_NAME, DB_VERSION, {
-      // Each version only adds stores, so data from earlier versions is kept.
+      // Each version adds stores (version 7 also drops version 6's cloudEvals), so other data is kept.
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const games = db.createObjectStore('games', { keyPath: 'id' });
@@ -76,13 +85,64 @@ export function getDb(): Promise<IDBPDatabase<AnalyserDB> | null> {
         if (oldVersion < 5) {
           db.createObjectStore('explorer');
         }
-        if (oldVersion < 6) {
-          db.createObjectStore('cloudEvals');
+        if (oldVersion >= 6 && oldVersion < 7) {
+          (db as unknown as IDBPDatabase).deleteObjectStore('cloudEvals');
+        }
+        if (oldVersion < 7) {
+          db.createObjectStore('engineEvals');
         }
       },
-    }).catch(() => null);
+      // An older copy of the app (another tab) keeps the old version open: say so, the upgrade waits.
+      blocked() {
+        dbBlocked = true;
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event(DB_BLOCKED_EVENT));
+      },
+      // A newer copy of the app wants to upgrade: let it, and load the new copy here too.
+      blocking(_current, _next, event) {
+        (event.target as IDBDatabase).close();
+        dbPromise = null;
+        if (typeof location !== 'undefined') location.reload();
+      },
+    })
+      .then((db) => {
+        clearTimeout(slow);
+        // The other tab closed: the upgrade went through.
+        if (dbBlocked) {
+          dbBlocked = false;
+          window.dispatchEvent(new Event(DB_BLOCKED_EVENT));
+        }
+        return db;
+      })
+      .catch((e: unknown) => {
+        clearTimeout(slow);
+        // The stored version is newer than this copy of the app (a newer copy ran here before).
+        // Versions only add stores, so open it as it is rather than losing access to the data.
+        if ((e as Error)?.name !== 'VersionError') return null;
+        return openDB<AnalyserDB>(DB_NAME, undefined, {
+          blocking(_current, _next, event) {
+            (event.target as IDBDatabase).close();
+            dbPromise = null;
+            if (typeof location !== 'undefined') location.reload();
+          },
+        }).catch(() => null);
+      });
   }
   return dbPromise;
+}
+
+/** Sent when the database upgrade waits for another tab of the app to close. */
+export const DB_BLOCKED_EVENT = 'chess-analyser:db-blocked';
+let dbBlocked = false;
+const BLOCKED_AFTER_MS = 3000;
+/** Whether the upgrade waited for another tab (it can happen before the page is drawn). */
+export const isDbBlocked = () => dbBlocked;
+
+// Development: a hot update loads this module again; close the old connection so an upgrade is not blocked by this very page.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    void dbPromise?.then((db) => db?.close());
+    dbPromise = null;
+  });
 }
 
 /** Tests only: forget the open connection so the next getDb() opens (and upgrades) again. */
@@ -385,6 +445,15 @@ export const explorerStore = {
     const db = await getDb();
     return db ? db.get('explorer', url) : undefined;
   },
+  async getMany(urls: readonly string[]): Promise<Map<string, { result: ExplorerResult; at: string }>> {
+    const out = new Map<string, { result: ExplorerResult; at: string }>();
+    const db = await getDb();
+    if (!db || !urls.length) return out;
+    const tx = db.transaction('explorer');
+    const got = await Promise.all(urls.map((u) => tx.store.get(u)));
+    urls.forEach((u, i) => got[i] && out.set(u, got[i]!));
+    return out;
+  },
   async put(url: string, result: ExplorerResult): Promise<string> {
     const at = new Date().toISOString();
     const db = await getDb();
@@ -397,21 +466,19 @@ export const explorerStore = {
   },
 };
 
-/** Lichess cloud evaluations, by position key. */
-export const cloudEvalStore = {
-  async getMany(keys: readonly string[]): Promise<Map<string, { eval: CloudEval | null; at: string }>> {
-    const out = new Map<string, { eval: CloudEval | null; at: string }>();
+/** This browser's engine evaluations, by `positionKey|depth`. */
+export const engineEvalStore = {
+  async getMany(keys: readonly string[]): Promise<Map<string, EngineEval>> {
+    const out = new Map<string, EngineEval>();
     const db = await getDb();
-    if (!db) return out;
-    const tx = db.transaction('cloudEvals');
+    if (!db || !keys.length) return out;
+    const tx = db.transaction('engineEvals');
     const got = await Promise.all(keys.map((k) => tx.store.get(k)));
     keys.forEach((k, i) => got[i] && out.set(k, got[i]!));
     return out;
   },
-  async put(key: string, value: CloudEval | null): Promise<string> {
-    const at = new Date().toISOString();
+  async put(key: string, value: EngineEval): Promise<void> {
     const db = await getDb();
-    await db?.put('cloudEvals', { eval: value, at }, key);
-    return at;
+    await db?.put('engineEvals', value, key);
   },
 };

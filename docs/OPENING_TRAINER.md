@@ -143,7 +143,8 @@ Progressive, each step costing grade: the piece to move, then its square, then a
 7. **Curated explanations, traps and reasoning questions.** → [phase 7 plan](OPENING_TRAINER_PHASE7.md)
 8. **Learn from your own games**: weak spots, better moves from the opening database, and the games and
    move orders behind every number. → [phase 8 plan](OPENING_TRAINER_PHASE8.md)
-9. **Lost in the opening, and training the fixes**: Lichess evaluations (no engine on the device), a game
+9. **Lost in the opening, and training the fixes**: win chances from Stockfish in the browser or from the
+   opening database's results, a game
    player with the played, engine and database moves, and a My fixes repertoire that starts at the
    position. → [phase 9 plan](OPENING_TRAINER_PHASE9.md)
 

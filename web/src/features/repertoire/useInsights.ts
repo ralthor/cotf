@@ -18,19 +18,20 @@ import { explorer, ExplorerError, explorerUrl, ratingGroupsFor, DEFAULT_FILTER, 
 
 export type InsightFilters = {
   colour: '' | Side;
-  timeClass: string;
+  /** Time controls to include; empty: all. */
+  timeClasses: string[];
   /** Last move number looked at. */
   maxMove: number;
   minGames: number;
   /** Opening losses: how many of your most recent games to look at. */
   scanGames: number;
   /** Opening losses: the smallest drop listed. */
-  minDrop: DropLabel;
+  minDrop: DropLabel | 'small';
   /** Opening losses: only games you did not win. */
   notWon: boolean;
 };
 
-const DEFAULT_FILTERS: InsightFilters = { colour: '', timeClass: '', maxMove: 15, minGames: 3, scanGames: 100, minDrop: 'inaccuracy', notWon: false };
+const DEFAULT_FILTERS: InsightFilters = { colour: '', timeClasses: [], maxMove: 15, minGames: 3, scanGames: 100, minDrop: 'inaccuracy', notWon: false };
 /** Positions looked up in one scan, most played first. */
 export const MAX_LOOKUPS = 300;
 /** Time between two requests to the explorer, to stay well inside Lichess's limits. */
@@ -43,9 +44,16 @@ export const RULES: Record<ExplorerDb, ImprovementRule> = { lichess: DEFAULT_RUL
 
 const SPEED_OF: Record<string, string> = { ultraBullet: 'bullet', bullet: 'bullet', blitz: 'blitz', rapid: 'rapid', classical: 'classical', daily: 'correspondence', correspondence: 'correspondence' };
 
+/** A game's time control as the filter names it (Lichess's ultra bullet is bullet, correspondence is daily). */
+export const timeClassOf = (tc: string | undefined) => (tc === 'ultraBullet' ? 'bullet' : tc === 'correspondence' ? 'daily' : tc ?? '');
+
 function readFilters(): InsightFilters {
   try {
-    return { ...DEFAULT_FILTERS, ...(JSON.parse(getPref('insightsFilters') ?? '{}') as Partial<InsightFilters>) };
+    const saved = JSON.parse(getPref('insightsFilters') ?? '{}') as Partial<InsightFilters> & { timeClass?: string };
+    // Before: one time control, '' for all.
+    if (!saved.timeClasses && saved.timeClass) saved.timeClasses = [saved.timeClass];
+    delete saved.timeClass;
+    return { ...DEFAULT_FILTERS, ...saved };
   } catch {
     return DEFAULT_FILTERS;
   }
@@ -99,8 +107,11 @@ export function useInsights(games: readonly OpeningGame[]) {
   };
 
   const filtered = useMemo(
-    () => games.filter((g) => (!filters.colour || g.userColour === filters.colour) && (!filters.timeClass || g.timeClass === filters.timeClass)),
-    [games, filters.colour, filters.timeClass],
+    () =>
+      games.filter(
+        (g) => (!filters.colour || g.userColour === filters.colour) && (!filters.timeClasses.length || filters.timeClasses.includes(timeClassOf(g.timeClass))),
+      ),
+    [games, filters.colour, filters.timeClasses],
   );
   const tree = useMemo(() => buildGamesTree(filtered, filters.maxMove * 2), [filtered, filters.maxMove]);
   const spots = useMemo(() => weakSpots(tree, { minGames: filters.minGames }), [tree, filters.minGames]);
@@ -124,7 +135,7 @@ export function useInsights(games: readonly OpeningGame[]) {
         const hit = await explorerStore.get(url);
         if (hit) found.set(url, hit);
       }
-      if (live) setLookups(found);
+      if (live) setLookups((m) => new Map([...m, ...found]));
     })();
     return () => {
       live = false;
@@ -225,8 +236,28 @@ export function useInsights(games: readonly OpeningGame[]) {
     },
     [db, lichessFilter, lookups, token],
   );
+  /** Loads saved database answers for these positions (opening losses). */
+  const loadFens = useCallback(
+    async (fens: readonly string[]) => {
+      const urls = fens.map((f) => explorerUrl(db, f, lichessFilter));
+      const got = await explorerStore.getMany(urls);
+      if (got.size) setLookups((m) => new Map([...m, ...got]));
+    },
+    [db, lichessFilter],
+  );
+  /** Fetches and saves one position's database answer; throws `ExplorerError` (paced by the caller). */
+  const fetchFen = useCallback(
+    async (fen: string, signal?: AbortSignal) => {
+      const url = explorerUrl(db, fen, lichessFilter);
+      const result = await explorer.get(db, fen, token, signal, lichessFilter);
+      const at = await explorerStore.put(url, result);
+      setLookups((m) => new Map(m).set(url, { result, at }));
+      return result;
+    },
+    [db, lichessFilter, token],
+  );
   /** The saved database answer for any position, if any. */
   const cachedFen = useCallback((fen: string) => lookups.get(explorerUrl(db, fen, lichessFilter))?.result, [db, lichessFilter, lookups]);
 
-  return { filters, setFilters, filtered, tree, spots, points, looked, improvements, lookupOf, lookupOne, lookupFen, cachedFen, improvementsOf, scan, startScan, stopScan, error, db, chooseDb, hasToken: !!token, lichessFilter, rule };
+  return { filters, setFilters, filtered, tree, spots, points, looked, improvements, lookupOf, lookupOne, lookupFen, cachedFen, loadFens, fetchFen, lookups, improvementsOf, scan, startScan, stopScan, error, db, chooseDb, hasToken: !!token, lichessFilter, rule };
 }

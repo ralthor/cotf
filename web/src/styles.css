@@ -267,6 +267,8 @@ a.button-link:hover { border-color: var(--accent); }
 .segmented button { border: 0; border-radius: 0; min-height: 36px; padding: 0 14px; background: var(--surface); }
 .segmented button + button { border-left: 1px solid var(--border); }
 .segmented button[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); }
+/* A group of toggles that may wrap on a phone (several can be on). */
+.segmented.wrap { flex-wrap: wrap; }
 
 /* Language menu in the header, and right-to-left tweaks (see src/i18n). */
 .lang-select {
@@ -533,3 +535,6 @@ button.choice-wrong { border-color: var(--cat-mistake); background: color-mix(in
 /* Five sub-tabs can be wider than a phone: let the row scroll instead of the page. */
 .openings-tabs { overflow-x: auto; scrollbar-width: none; }
 .openings-tabs button { flex: none; white-space: nowrap; }
+
+/* The games under a move order in "Lost in the opening". */
+.group-games { margin: 0; padding-inline-start: 18px; display: grid; gap: 2px; }

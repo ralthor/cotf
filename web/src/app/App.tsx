@@ -15,7 +15,7 @@ import { clearDeepLink, importLichessGame, invalidDeepLinkReason, lichessGameRec
 import { ImportError } from '../features/import/http';
 import { About, Disclaimer } from './About';
 import { LanguageSelect, useT } from '../i18n/react';
-import { AppUpdate, InstallButton } from './AppUpdate';
+import { AppUpdate, DbBlocked, InstallButton } from './AppUpdate';
 import { Icon } from '../components/Icon';
 import { OPEN_GAME_EVENT, type OpenGameDetail } from './openGame';
 
@@ -161,6 +161,7 @@ function Shell() {
         <LanguageSelect className="lang-select" />
       </header>
       <AppUpdate />
+      <DbBlocked />
       <main>
         {route === 'analyse' && (
           <div className="layout">

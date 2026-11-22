@@ -115,7 +115,7 @@ export class LichessClient {
   ): Promise<LichessListing> {
     const u = normaliseLichessUsername(username);
     const max = Math.max(1, Math.min(opts.max ?? 20, 100));
-    const params = new URLSearchParams({ max: String(max), pgnInJson: 'true', clocks: 'true', evals: 'true', opening: 'true', finished: 'true' });
+    const params = new URLSearchParams({ max: String(max), pgnInJson: 'true', clocks: 'true', opening: 'true', finished: 'true' });
     if (opts.since) params.set('since', String(opts.since));
     if (opts.perfType) params.set('perfType', opts.perfType);
     const url = `${LICHESS_ORIGIN}/api/games/user/${encodeURIComponent(u)}?${params}`;
@@ -157,7 +157,7 @@ export class LichessClient {
   async game(idOrUrl: string, signal?: AbortSignal): Promise<LichessGame> {
     const id = parseLichessGameId(idOrUrl);
     if (!id) throw new ImportError('invalid-input', t('link.notGame'));
-    const params = new URLSearchParams({ pgnInJson: 'true', clocks: 'true', evals: 'true', opening: 'true' });
+    const params = new URLSearchParams({ pgnInJson: 'true', clocks: 'true', opening: 'true' });
     const body = await this.http.getText(`${LICHESS_ORIGIN}/game/export/${id}?${params}`, 'application/json', signal);
     let data: unknown;
     try {

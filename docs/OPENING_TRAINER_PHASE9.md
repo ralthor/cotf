@@ -1,6 +1,6 @@
 # Opening trainer, phase 9: where your games went wrong, and training the fixes
 
-Status: implemented, 21 Nov 2026. Builds on [phase 8](OPENING_TRAINER_PHASE8.md); the overall plan is in
+Status: implemented, 21 Nov 2026; win chances from the engine here or the database since 22 Nov 2026. Builds on [phase 8](OPENING_TRAINER_PHASE8.md); the overall plan is in
 [OPENING_TRAINER.md](OPENING_TRAINER.md).
 
 ## Why
@@ -41,46 +41,38 @@ the database plays. And the findings could not be trained.
    answer. **Train My fixes** opens the Train sub-tab on it, with the usual spaced repetition.
 5. **Not a problem** hides a finding in both lists; hidden ones can be shown and brought back.
 
-## Evaluations: Lichess, not an engine here
+## Win chances: the engine here, or the database
 
-No engine runs on the device.
+You pick the source above the list. Lichess's analysis servers are not used.
 
-- **Lichess games you had analysed there** carry their evaluations in the PGN (`[%eval]`). Games are now
-  fetched with `evals=true`; for these no request is needed.
-- **Everything else** uses Lichess cloud evaluations (`/api/cloud-eval`), open, no token, with CORS.
-  Checked on 21 Nov 2026: two typical lines had evaluations at 24 of 24 and 20 of 22 positions.
-  Positions Lichess has not analysed stay without one; they are asked again after 30 days.
-- Win chances use the Lichess formula (the same logistic as the rest of the app), so −10%, −20%, −30%
-  are what Lichess calls an inaccuracy, a mistake and a blunder.
+- **Engine on this device**: Stockfish in the browser analyses every position of each game's opening, at
+  a depth you pick: quick (10), normal (14) or deep (18). Win chances use the Lichess formula, so −10%,
+  −20%, −30% are what Lichess calls an inaccuracy, a mistake and a blunder. Results are kept per position
+  and depth, so a position is analysed once. Measured: 50 games (1,344 positions) at depth 10 in under 20 s.
+- **Opening database**: how players actually scored, from the Lichess players database (token) or the
+  masters database. Before your move: the position's results. After it: the games where your move was
+  played there; the position's own results only when your move is too rare there. A value needs at
+  least 50 games. Lookups are paced (one every 1.1 s, a minute's wait on "too many requests").
+  The list can also show drops from −5%, since the database's drops are smaller than the engine's.
 
-The Lichess opening explorer itself has no evaluations, only move statistics; those stay the database
-side.
-
-## Rules
-
-- A first pass asks for the position before your first move and the position after each of your moves,
-  up to the "up to move" limit. A drop between two of them covers your move and the opponent's reply
-  before it.
-- Then, for each game's worst move, the position right before it is asked for: that makes the drop exact
-  and gives the best move. Up to three rounds, since the worst move can change once measured exactly.
-  The sentence says when a drop could not be measured exactly.
-- Requests are paced at one every 1.1 s with a one-minute wait on "too many requests", and each position
-  is asked once and kept. Positions shared by many games are asked once.
-- The game player looks up the position it stops on (after a short pause), not paced, since it is one
-  position at a time.
+The game player analyses the position it stops on with the engine (after a short pause), whatever the
+source, so the engine's move is always there; with the database source it also shows the database's
+value before and after the move.
 
 ## Storage
 
-- IndexedDB version 6: `cloudEvals` (position key → evaluation or "not analysed", and the date).
+- IndexedDB version 7: `engineEvals` (`position key|depth` → score, depth, line). Version 6's
+  `cloudEvals` (the first version, with Lichess cloud evaluations) is dropped.
 - Preferences: `insightsHidden` (hidden findings), `fixesRepertoire` (the My fixes repertoire),
-  `insightsList` (the list shown); the losses filters join `insightsFilters`.
+  `insightsList` (the list shown), `lossSource` and `lossDepth`; the losses filters join `insightsFilters`.
 
 ## Files
 
-- `core/repertoire/openingLoss.ts`: win chances, drops, the worst move, the plies to ask for. Pure, tested.
-- `features/repertoire/cloudEval.ts`: the cloud evaluation client (castling written as e1g1).
-- `features/repertoire/paced.ts`: paced requests with the 429 wait.
-- `features/repertoire/useOpeningLosses.ts`: the scan and the evaluations kept in IndexedDB.
+- `core/repertoire/openingLoss.ts`: win chances from the engine or the database, drops, the worst move,
+  the database positions to ask for. Pure, tested.
+- `features/repertoire/paced.ts`: paced database requests with the 429 wait.
+- `features/repertoire/useOpeningLosses.ts`: the source, the engine scan (over the engine pool) and the
+  database scan, with results kept in IndexedDB.
 - `features/repertoire/GamePlayer.tsx`: the game player.
 - `features/repertoire/fixes.ts`: building a My fixes chapter (replies from the database, PGN).
 
@@ -88,4 +80,5 @@ side.
 
 - Replaying the moves before a fix's position on the training board (the trainer shows them as text).
 - Uploading a game to Lichess for a new analysis (the links open Lichess's own pages).
+- Mixing the two sources in one list.
 - Opponents' mistakes in the opening (only your moves are measured).

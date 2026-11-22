@@ -85,10 +85,10 @@ the selected repertoire:
   the position, what was played next, the database's moves, and the games themselves with links and
   **Analyse**.
 - **Lost in the opening**: each recent game with the move where your win chances dropped most, from
-  Lichess evaluations (the game's own analysis, or Lichess cloud evaluations; no engine runs on your
-  device), with the best move and where you stood when the opening ended.
+  Stockfish running in your browser (pick the depth) or from the opening database's results (how
+  players actually scored), with the best move and where you stood when the opening ended.
 - A **game player** shows any of these games with the move played, the engine's move and the database's
-  move side by side, the evaluation, and links to the game on Lichess and to Analyse at that move.
+  move side by side, your win chances, and links to the game on Lichess and to Analyse at that move.
 - **My fixes**: a better move becomes a training chapter that starts at that position, with the
   opponent's likely replies from the database.
 - **Not a problem** hides a finding.

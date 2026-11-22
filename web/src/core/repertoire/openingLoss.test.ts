@@ -2,63 +2,74 @@ import { describe, expect, it } from 'vitest';
 import { parseSingleGame } from '../chess/pgn';
 import type { EngineScore } from '../engine/types';
 import { toOpeningGame, type OpeningGame } from './games';
-import { dropLabel, openingLoss, pgnEvals, pliesToLookUp, refinePly, type EvalAt } from './openingLoss';
-import { parseCloudEval, standardLine } from '../../features/repertoire/cloudEval';
+import { DEFAULT_RULE } from './insights';
+import { dbPliesNeeded, dbValueAt, dropLabel, engineValue, MIN_DB_GAMES, openingLoss, scoreFromWin, yourPlies, type ValueAt } from './openingLoss';
 
-function game(moves: string, result: string, me: 'w' | 'b' = 'w', pgnExtra = ''): OpeningGame {
+function game(moves: string, result: string, me: 'w' | 'b' = 'w'): OpeningGame {
   const [white, black] = me === 'w' ? ['Me', 'Opp'] : ['Opp', 'Me'];
-  const pgn = `[White "${white}"]\n[Black "${black}"]\n[Result "${result}"]\n[UTCDate "2026.11.01"]\n\n${pgnExtra || moves} ${result}`;
+  const pgn = `[White "${white}"]\n[Black "${black}"]\n[Result "${result}"]\n[UTCDate "2026.11.01"]\n\n${moves} ${result}`;
   const rec = parseSingleGame(pgn, { source: 'lichess', sourceUrl: 'https://lichess.org/x' });
   return toOpeningGame({ ...rec, id: 'x' }, 'Me')!;
 }
 
 const cp = (v: number): EngineScore => ({ kind: 'cp', value: v, perspective: 'white' });
-const evals = (m: Record<number, number>, pv: Record<number, string[]> = {}): EvalAt => (ply) => (ply in m ? { score: cp(m[ply]!), pv: pv[ply] } : undefined);
+const evals = (m: Record<number, number>, pv: Record<number, string[]> = {}): ValueAt => (ply) => (ply in m ? engineValue({ score: cp(m[ply]!), pv: pv[ply] }) : undefined);
 
 describe('opening losses', () => {
   const g = game('1. e4 e5 2. Nf3 Nc6 3. Bc4 Nd4 4. Nxe5 Qg5', '0-1');
 
-  it('asks for the position before your first move and after each of yours', () => {
-    expect(pliesToLookUp(g, 8)).toEqual([0, 1, 3, 5, 7]);
-    expect(pliesToLookUp(game('1. e4 e5 2. Nf3 Nc6', '1-0', 'b'), 4)).toEqual([1, 2, 4]);
+  it('lists your moves', () => {
+    expect(yourPlies(g, 8)).toEqual([1, 3, 5, 7]);
+    expect(yourPlies(game('1. e4 e5 2. Nf3 Nc6', '1-0', 'b'), 4)).toEqual([2, 4]);
   });
 
-  it('finds the move that dropped your win chances most, exact when the position before is known', () => {
-    const loss = openingLoss(g, 8, evals({ 0: 20, 1: 30, 3: 35, 5: 30, 6: 30, 7: -400 }, { 6: ['f3d4', 'g5g2'] }));
+  it('finds the engine move that dropped your win chances most, with the best move', () => {
+    const loss = openingLoss(g, 8, evals({ 0: 20, 1: 30, 2: 30, 3: 35, 4: 30, 5: 30, 6: 30, 7: -400 }, { 6: ['f3d4', 'g5g2'] }));
     expect(loss.worst?.san).toBe('Nxe5');
-    expect(loss.worst?.beforePly).toBe(6);
     expect(loss.worst?.best).toBe('f3d4');
+    expect(loss.worst?.line).toEqual(['f3d4', 'g5g2']);
     expect(dropLabel(loss.worst!.drop)).toBe('blunder');
     expect(loss.end?.ply).toBe(7);
-    expect(loss.known).toBe(5);
-    expect(refinePly(loss)).toBeNull();
+    expect(loss.known).toBe(4);
+    expect(loss.wanted).toBe(4);
   });
 
-  it('measures over two plies when the position before is missing, and asks for it', () => {
-    const loss = openingLoss(g, 8, evals({ 0: 20, 1: 30, 3: 35, 5: 30, 7: -400 }));
-    expect(loss.worst?.beforePly).toBe(5);
-    expect(loss.worst?.best).toBeUndefined();
-    expect(refinePly(loss)).toBe(6);
+  it('skips a move whose position before is not known', () => {
+    const loss = openingLoss(g, 8, evals({ 0: 20, 1: 30, 5: 30, 7: -400 }));
+    expect(loss.known).toBe(1);
+    expect(loss.worst).toBeNull();
   });
 
-  it('reads evaluations written in a Lichess game', () => {
-    const withEvals = '1. e4 { [%eval 0.3] } 1... e5 { [%eval 0.25] } 2. Qh5 { [%eval -0.5] } 2... Nc6 { [%eval #-3] }';
-    const m = pgnEvals(game('', '0-1', 'w', withEvals).pgn);
-    expect(m.get(1)).toEqual(cp(30));
-    expect(m.get(3)).toEqual(cp(-50));
-    expect(m.get(4)).toEqual({ kind: 'mate', moves: 3, winner: 'b', perspective: 'white' });
+  it('turns win chances back into an evaluation for the chart', () => {
+    expect(engineValue({ score: scoreFromWin(0.7) }).win).toBeCloseTo(0.7, 2);
   });
 });
 
-describe('cloud evaluations', () => {
-  it('reads a cloud answer and writes castling as the rest of the app does', () => {
-    const fen = 'r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
-    const e = parseCloudEval({ depth: 40, pvs: [{ moves: 'e1h1 g8f6', cp: 25 }] }, fen);
-    expect(e).toEqual({ score: cp(25), depth: 40, pv: ['e1g1', 'g8f6'] });
+describe('opening losses from the database', () => {
+  const g = game('1. e4 e5 2. Qh5 Nc6', '1-0');
+  const res = (white: number, draws: number, black: number, moves: { san: string; uci: string; white: number; draws: number; black: number }[] = []) => ({ white, draws, black, moves });
+  // Position before 2. Qh5 (after 1... e5): Nf3 is main and scores well, Qh5 scores badly.
+  const before2 = res(5000, 1000, 4000, [
+    { san: 'Nf3', uci: 'g1f3', white: 3000, draws: 600, black: 2000 },
+    { san: 'Qh5', uci: 'd1h5', white: 300, draws: 50, black: 650 },
+  ]);
+  const at = (m: Record<number, ReturnType<typeof res>>) => (p: number) => m[p];
+
+  it('uses the position before and the move\'s own results', () => {
+    const loss = openingLoss(g, 4, dbValueAt(g, 4, at({ 0: res(5000, 1000, 4000, [{ san: 'e4', uci: 'e2e4', white: 2600, draws: 500, black: 2000 }]), 2: before2 }), DEFAULT_RULE));
+    expect(loss.worst?.san).toBe('Qh5');
+    expect(loss.worst?.beforeWin).toBeCloseTo(0.55, 2);
+    expect(loss.worst?.afterWin).toBeCloseTo(0.325, 3);
+    expect(loss.worst?.after.games).toBe(1000);
+    expect(loss.worst?.best).toBe('g1f3');
   });
 
-  it('keeps a rook move from e1 to h1 as it is', () => {
-    expect(standardLine('k7/8/8/8/8/8/K7/4R3 w - - 0 1', ['e1h1'])).toEqual(['e1h1']);
+  it('asks for the position before each of your moves, then after a rare one', () => {
+    const rare = res(5000, 1000, 4000, [{ san: 'Nf3', uci: 'g1f3', white: 3000, draws: 600, black: 2000 }]);
+    const known = (m: Record<number, unknown>) => (p: number) => p in m;
+    expect(dbPliesNeeded(g, 4, at({}), known({}))).toEqual([0, 2]);
+    expect(dbPliesNeeded(g, 4, at({ 0: before2, 2: rare }), known({ 0: 1, 2: 1 }))).toEqual([1, 3]);
+    expect(MIN_DB_GAMES).toBeGreaterThan(0);
   });
 });
 

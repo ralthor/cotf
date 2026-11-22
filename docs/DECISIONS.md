@@ -351,11 +351,20 @@ Plan: `OPENING_TRAINER_PHASE9.md`.
 
 - **Results are not enough.** Weak spots come from results, so a game lost in the opening and won later
   looks fine. Each game now gets its worst move in the opening from evaluations.
-- **Evaluations come from Lichess, not an engine on the device**: the game's own analysis when it was
-  analysed on Lichess, else Lichess cloud evaluations. They cover typical opening positions well
-  (24 of 24 and 20 of 22 in two test lines), cost no device time, and are kept per position.
-- **Two passes keep requests down**: first the positions after your moves, then only the position before
-  each game's worst move, which makes it exact and names the best move.
+- **Two sources, chosen by you; Lichess's analysis servers are not used.** A first version took
+  Lichess cloud evaluations; it was replaced the same week, so as not to lean on a free public service
+  for bulk lookups.
+  - **Engine on this device**: Stockfish (WASM) analyses every position of each game's opening at a
+    depth you pick (10, 14 or 18). Every position, so each drop is exact and names the best move. Each
+    game runs on one engine, in order, so its hash carries over; games are spread over the engines.
+    Measured: 50 games, 1,344 positions at depth 10 in under 20 s. Results are kept per position and depth.
+  - **Opening database**: win chances are how players actually scored, not an evaluation. Before your
+    move: the position's own results. After it: the games where your move was played there (the move's
+    row in the position before), so the value does not depend on which positions were looked up; the
+    position's own results only when the move is too rare in that row. At least 50 games, else unknown.
+    Requests are paced as for the better-moves scan. The masters database runs out after a few moves,
+    so the Lichess players database (token) is the useful one.
+- **Games are fetched without Lichess's analysis** (`evals` is not asked for), since it is not used.
 - **Lichess's win-chance scale and labels** (−10% inaccuracy, −20% mistake, −30% blunder), so the numbers
   match what Lichess shows for the same game.
 - **Fixes are ordinary repertoire chapters** starting at the position (PGN with `FEN`/`SetUp`), so
